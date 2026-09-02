@@ -80,7 +80,8 @@ function tideInfo(di){ const mul=((di%15)+15)%15+1; const spring=Math.abs(Math.s
 function weatherOf(y, m, d, model){
   const di=dayIndex(y,m,d);
   const b=rnd(di+11,5), b2=rnd(di+7,9); const sh=model==="ecmwf"?-0.12:model==="kma"?0.1:0;
-  const mock={ wave:+Math.max(0.2,0.4+b*1.7+sh*0.6).toFixed(1), wind:Math.round(Math.max(1,3+b2*8+sh*4)), temp:Math.round(17+b*8-di*0.08), rain:Math.round((b2*70)%100) };
+  const SEA_TEMP=[2,4,9,15,20,24,27,28,24,18,11,4]; // 서해 월평균 근사(데모용)
+  const mock={ wave:+Math.max(0.2,0.4+b*1.7+sh*0.6).toFixed(1), wind:Math.round(Math.max(1,3+b2*8+sh*4)), temp:Math.round(SEA_TEMP[m]+(b-0.5)*6), rain:Math.round((b2*70)%100) };
   const real=S.weather && S.weather[ymd(y,m,d)];
   if(real){ return {
     temp: real.temp!=null?real.temp:mock.temp,
