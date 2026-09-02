@@ -1,6 +1,6 @@
 // sw.js — 물때빈자리 서비스워커
 // 앱셸: 캐시 우선(빠르고 오프라인 동작) / data.json: 네트워크 우선(온라인이면 최신, 아니면 마지막 캐시)
-const VERSION = "v1.0.0";
+const VERSION = "v1.5.0";
 const SHELL = `shell-${VERSION}`;
 const DATA = `data-${VERSION}`;
 
@@ -12,6 +12,8 @@ const SHELL_ASSETS = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/apple-touch-icon.png",
+  "img/bada.jpg",
+  "img/chamdom.jpg",
 ];
 
 self.addEventListener("install", (e) => {

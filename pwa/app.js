@@ -4,7 +4,7 @@
 // ── 백엔드(Google Apps Script) 주소 ──
 // 배포한 웹앱 /exec URL을 넣으면 구글 시트에서 데이터를 읽고, 공유한 URL이 시트에 쌓입니다.
 // 비워두면 로컬 data.json 을 사용합니다.
-const API_URL = "https://script.google.com/macros/s/AKfycbwNycJ8YFtaxd9rYknRg7qXZAYwgbB4l3lNOyxwgs4uiBOMcf0qrnnRvlHa-Cns6a2m/exec"; // 예: "https://script.google.com/macros/s/XXXX/exec"
+const API_URL = "https://script.google.com/macros/s/AKfycbwNycJ8YFtaxd9rYknRg7qXZAYwgbB4l3lNOyxwgs4uiBOMcf0qrnnRvlHa-Cns6a2m/exec";
 
 // ── 팔레트 (CSS 변수와 동일) ──
 const C = { ink:"#0e2a30", inkSoft:"#4a636a", tide:"#2b8896", tideSoft:"#d3e9ea",
@@ -32,6 +32,15 @@ const SP_EMOJI = { "쭈꾸미":"🐙", "갑오징어":"🦑", "주꾸미":"🐙"
 const spEmoji = (n) => SP_EMOJI[n] || "🐟";
 const BASE_SPECIES = ["쭈꾸미", "갑오징어", "백조기"];
 
+// 어종별 헤더 배경 이미지 (img/ 폴더에 추가하고 여기 매핑만 채우면 됩니다)
+const SP_BG = {
+  "전체":"img/bada.jpg",
+  "쭈꾸미":"img/bada.jpg", "갑오징어":"img/bada.jpg", "주꾸미":"img/bada.jpg", "오징어":"img/bada.jpg", "한치":"img/bada.jpg",
+  "백조기":"img/bada.jpg", "우럭":"img/bada.jpg", "광어":"img/bada.jpg",
+  "참돔":"img/chamdom.jpg", "돔":"img/chamdom.jpg", "감성돔":"img/chamdom.jpg",
+};
+const bgFor = (n) => SP_BG[n] || "img/bada.jpg";
+
 const MODELS = [
   { id:"openmeteo", label:"Open-Meteo", sub:"멀티모델(ECMWF 포함)" },
   { id:"ecmwf", label:"ECMWF", sub:"중기 전지구" },
@@ -45,7 +54,7 @@ const LS = {
 };
 
 const S = {
-  monthOff: 0, species: "전체", sel: null, model: "openmeteo", tab: "cal",
+  monthOff: 0, species: "전체", port: "전체", sel: null, model: "openmeteo", tab: "cal",
   subs: LS.get("subsMap", {}),        // boatId → ["2026-09-19~2026-09-20", ...]
   editBoat: null, editRanges: [], editFrom: "", editTo: "",  // 기간 편집 중
   extra: LS.get("extra", []),          // URL로 추가된 출조점
@@ -65,7 +74,14 @@ const DOW = ["일","월","화","수","목","금","토"];
 
 function allSpots(){ return [...S.data.spots, ...S.extra]; }
 function allBoats(){ const out=[]; for(const sp of allSpots()) for(const b of (sp.boats||[])) out.push({...b, _spot:sp.name, _port:sp.port}); return out; }
-function boatsForSp(sp){ const bs=allBoats(); return sp==="전체"?bs:bs.filter(b=>(b.sp||[]).includes(sp)); }
+function boatsForSp(sp){
+  let bs=allBoats();
+  if(S.port && S.port!=="전체") bs=bs.filter(b=>(b._port||"")===S.port);
+  return sp==="전체"?bs:bs.filter(b=>(b.sp||[]).includes(sp));
+}
+function portsList(){ const set=[]; for(const s of allSpots()){ if(s.port && !set.includes(s.port)) set.push(s.port); } return set; }
+// 그날 물높이 비율(0~1): 물때가 클수록(사리) 높게, 조금일수록 낮게
+function tideFrac(di){ const mul=((di%15)+15)%15+1; return Math.round(Math.abs(Math.sin((mul/15)*Math.PI))*100)/100; }
 
 function dayIndex(y,m,d){ return Math.round((Date.UTC(y,m,d)-Date.UTC(2024,0,1))/86400000); }
 function ymd(y,m,d){ return `${y}-${pad2(m+1)}-${pad2(d)}`; }
@@ -91,6 +107,18 @@ function weatherOf(y, m, d, model){
     rain: real.rain!=null?real.rain:mock.rain,
     _real:true }; }
   return mock;
+}
+// 날씨 상태 → 아이콘 (파고·강수 기준)
+function skyIcon(w){ if((w.rain||0)>=60||(w.wave||0)>1.8) return "🌧️"; if((w.rain||0)>=30||(w.wave||0)>1.2) return "⛅"; return "☀️"; }
+// 오전/오후 날씨 (실측 am/pm 있으면 사용, 없으면 데모로 오후를 조금 흐리게)
+function weatherAMPM(y,m,d,model){
+  const base=weatherOf(y,m,d,model);
+  const real=S.weather && S.weather[ymd(y,m,d)];
+  if(real && real.am && real.pm) return { am:skyIcon(real.am), pm:skyIcon(real.pm), _real:true };
+  const s=rnd(dayIndex(y,m,d)+3,2);
+  const am={ rain:Math.round((base.rain||0)*0.65), wave:+((base.wave||0.5)*0.9).toFixed(1) };
+  const pm={ rain:Math.min(100,Math.round((base.rain||0)*1.15+s*18)), wave:+((base.wave||0.5)*1.1).toFixed(1) };
+  return { am:skyIcon(am), pm:skyIcon(pm) };
 }
 function goScore(w){ if(w.wave<=1.0&&w.wind<=7)return{t:"출조 좋음",c:C.tide}; if(w.wave<=1.5&&w.wind<=10)return{t:"무난",c:C.inkSoft}; return{t:"너울 주의",c:C.urgent}; }
 function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
@@ -159,13 +187,13 @@ function renderHeader(){
       <button data-action="spadd" style="background:${C.beacon};color:#fff;border:none;border-radius:10px;padding:0 14px;font-size:13px;font-weight:800;cursor:pointer">추가</button>
       <button data-action="spcancel" style="background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:10px;padding:0 12px;font-size:13px;font-weight:700;cursor:pointer">취소</button>
     </div>` : "";
-  return `<div class="hdr">
+  return `<div class="hdr" style="background-image:linear-gradient(180deg,rgba(14,42,48,.74),rgba(14,42,48,.48)),url('${bgFor(S.species)}');background-size:cover;background-position:center;">
     <div class="row gap">
       <span style="font-size:18px">⚓</span>
       <div style="font-size:19px;font-weight:800;letter-spacing:-.5px">물때빈자리</div>
-      <div style="margin-left:auto;font-size:11px;opacity:.7">${upd?`↻ ${upd} 업데이트`:"오프라인 데이터"}</div>
+      <div style="margin-left:auto;font-size:11px;opacity:.85">${upd?`↻ ${upd} 업데이트`:"오프라인 데이터"}</div>
     </div>
-    <div style="font-size:12px;opacity:.75;margin-top:4px">서해 선상 · 쭈꾸미 · 갑오징어 · 백조기</div>
+    <div style="font-size:12px;opacity:.85;margin-top:4px">서해 선상 · 쭈꾸미 · 갑오징어 · 백조기</div>
     <div class="chips">
       ${chips.map(s=>{
         const isCustom = s!=="전체" && !BASE_SPECIES.includes(s);
@@ -179,38 +207,62 @@ function renderHeader(){
   </div>`;
 }
 
+// 달력 뒤 물 흐름 배경 — 날짜들이 물 위에 이어지는 느낌
+function waterSVG(){
+  let g="";
+  for(let i=0;i<12;i++){ const y=i*9+4; let p=`M0,${y}`;
+    for(let x=0;x<100;x+=8) p+=` Q${x+4},${(y-1.6).toFixed(1)} ${x+8},${y}`;
+    g+=`<path d="${p}" fill="none" stroke="#2b8896" stroke-width="0.5" opacity="0.35"/>`; }
+  return `<svg viewBox="0 0 100 108" preserveAspectRatio="none" width="100%" height="100%" style="display:block">${g}</svg>`;
+}
+
 function renderCalendar(){
   const v=view(), y=v.getFullYear(), m=v.getMonth();
   const dim=new Date(y,m+1,0).getDate(), fdow=new Date(y,m,1).getDay();
+  const weeks=Math.ceil((fdow+dim)/7);
   const today=new Date(); const todayMid=new Date(today.getFullYear(),today.getMonth(),today.getDate());
   let cells="";
   for(let i=0;i<fdow;i++) cells+=`<div></div>`;
+  const portSel = S.port && S.port!=="전체";
   for(let d=1;d<=dim;d++){
     const dt=new Date(y,m,d), past=dt<todayMid, di=dayIndex(y,m,d);
     let sum=0, hasData=false;
     if(!past) for(const b of boatsForSp(S.species)){ const s=seatsOf(b,y,m,d); if(s!==null){ hasData=true; sum+=s; } }
-    const t=tideInfo(di), w=weatherOf(y,m,d,S.model), on=S.sel===d;
+    const t=tideInfo(di), on=S.sel===d, ap=weatherAMPM(y,m,d,S.model);
+    const fill = portSel ? `<div class="cellfill" style="height:${Math.round(tideFrac(di)*100)}%"></div>` : "";
     cells+=`<button class="cell ${on?"on":""}" data-action="day" data-v="${d}" ${past?"disabled":""}>
-      <div class="d">${d}</div>
-      ${past ? `<div class="none">지남</div>`
-        : (!hasData ? `<div class="none" style="font-size:9px">정보없음</div>`
-          : (sum>0 ? `<div class="open">빈 ${sum}</div>` : `<div class="none">마감</div>`))}
-      <div class="mul">${t.mul}물</div>
-      <div class="wv">🌊<span>${w.wave}m</span></div>
+      ${fill}
+      <div class="cellin">
+        <div class="d">${d}</div>
+        ${past ? `<div class="none">지남</div>`
+          : (!hasData ? `<div class="none" style="font-size:9px">정보없음</div>`
+            : (sum>0 ? `<div class="open">빈 ${sum}</div>` : `<div class="none">마감</div>`))}
+        <div class="mul">${t.mul}물</div>
+        <div class="wv" style="justify-content:center;gap:3px;font-size:9px"><span title="오전">${ap.am}</span><span title="오후">${ap.pm}</span></div>
+      </div>
     </button>`;
   }
   const ml=`${y}.${pad2(m+1)}`;
   let detail = S.sel ? renderDetail(y,m,S.sel) : `<div style="margin-top:20px;text-align:center;color:${C.inkSoft};font-size:13px;padding:24px 0">⚓<br>날짜를 눌러 물때·날씨·빈자리 배를 확인하세요.</div>`;
+  const ports=portsList();
+  const portRow = ports.length ? `<div class="ports">
+      <button class="port ${S.port==="전체"?"on":""}" data-action="port" data-v="전체">전체 항구</button>
+      ${ports.map(p=>`<button class="port ${S.port===p?"on":""}" data-action="port" data-v="${esc(p)}">📍 ${esc(p)}</button>`).join("")}
+    </div>` : "";
   return `<div class="pad">
     <div class="row" style="justify-content:space-between;margin-bottom:10px">
       <button class="navbtn" data-action="month" data-v="-1">◀</button>
       <div style="font-size:16px;font-weight:800">${ml}</div>
       <button class="navbtn" data-action="month" data-v="1">▶</button>
     </div>
+    ${portRow}
     <div class="cal" style="margin-bottom:5px">${DOW.map((d,i)=>`<div class="dow" style="color:${i===0?C.urgent:i===6?C.tide:C.inkSoft}">${d}</div>`).join("")}</div>
-    <div class="cal">${cells}</div>
+    <div style="position:relative">
+      <div style="position:absolute;inset:0;border-radius:10px;overflow:hidden;pointer-events:none">${waterSVG()}</div>
+      <div class="cal" style="position:relative">${cells}</div>
+    </div>
     <div class="row" style="gap:12px;margin-top:12px;font-size:10.5px;color:${C.inkSoft}">
-      <span><b style="color:${C.beacon}">빈 N</b> 빈자리</span><span><b style="color:${C.full}">마감</b> 예약완료</span><span><b style="color:${C.inkSoft}">정보없음</b> 미수집</span><span>🌊 파고</span>
+      <span><b style="color:${C.beacon}">빈 N</b> 빈자리</span><span><b style="color:${C.full}">마감</b> 예약완료</span><span><b style="color:${C.inkSoft}">정보없음</b> 미수집</span>${S.port&&S.port!=="전체"?`<span><b style="color:#3fbfa0">▨</b> 물높이(물때)</span>`:`<span>🌊 파고</span>`}
     </div>
     ${detail}
   </div>`;
@@ -262,6 +314,9 @@ function renderDetail(y,m,d){
       <div style="font-size:10px;color:${C.inkSoft};margin-bottom:10px">${w._real?"소스: 실데이터 · Open-Meteo(시트 연동)":"소스: "+MODELS.find(x=>x.id===S.model).sub+" · 데모값"}</div>
       <div class="cal" style="grid-template-columns:repeat(4,1fr)">
         ${metric("🌡️",w.temp+"°","기온")}${metric("🌊",w.wave+"m","파고",w.wave>1.5)}${metric("💨",w.wind,"풍속 m/s",w.wind>10)}${metric("💧",w.rain+"%","강수")}
+      </div>
+      <div class="row" style="justify-content:center;gap:22px;margin-top:10px;padding:8px 0;border-top:1px solid ${C.line}">
+        ${(()=>{const ap=weatherAMPM(y,m,d,S.model);return `<div style="text-align:center"><div style="font-size:18px">${ap.am}</div><div style="font-size:10px;color:${C.inkSoft};margin-top:1px">오전</div></div><div style="text-align:center"><div style="font-size:18px">${ap.pm}</div><div style="font-size:10px;color:${C.inkSoft};margin-top:1px">오후</div></div>`;})()}
       </div>
       <div style="margin-top:10px;background:${"#eef2f1"};border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;color:${gs.c}">⚓ ${gs.t}</div>
     </div>
@@ -407,6 +462,7 @@ document.addEventListener("click",(e)=>{
   else if(a==="spcancel"){ S.addingSp=false; S.spDraft=""; render(); }
   else if(a==="spdel"){ removeSpecies(v); }
   else if(a==="month"){ S.monthOff+=parseInt(v,10); S.sel=null; render(); }
+  else if(a==="port"){ S.port=v; S.sel=null; render(); }
   else if(a==="day"){ S.sel=parseInt(v,10); render(); }
   else if(a==="model"){ S.model=v; render(); }
   else if(a==="sub"){ S.editBoat=v; S.editRanges=(S.subs[v]||[]).slice(); S.editFrom=""; S.editTo=""; render(); }
