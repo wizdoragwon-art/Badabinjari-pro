@@ -47,11 +47,13 @@ export async function fetchAvailability(spot) {
 
   const out = [];
   for (const { ym, text } of all) out.push(...parseSchedule(text, Math.floor(ym / 100)));
+  console.log(`[${spot.name}] 슬롯 ${out.length}건`);
   return out.map((s) => ({ ...s, url: base }));
 }
 
 async function getText(url) {
   const res = await fetch(url, { headers: { "User-Agent": UA } });
+  console.log(`  [sunsang24] GET ${url} → HTTP ${res.status}`);
   if (!res.ok) throw new Error(`HTTP ${res.status} — ${url}`);
   return res.text();
 }

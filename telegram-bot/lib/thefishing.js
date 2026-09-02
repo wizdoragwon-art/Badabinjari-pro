@@ -1,156 +1,125 @@
 // lib/thefishing.js
-// 더피싱(thefishing.kr / myfishmap) 플랫폼 예약현황(mid=bk) 실제 파서.
-//
-//  페이지 구조(관찰됨):
-//   · 날짜 섹션 헤더:  "2026년 09월 01일, 화요일, 11물"   (물때 포함)
-//   · 각 배 행:  선박명 / 공지(어종·출항시각) / 입금자 목록 / 남은자리
-//   · 입금자 표기:  "김*선님(3명/10,9,8)"  ← 예약된 좌석번호
-//   · 마감 표시:  남은자리 칸에 r_x_0.gif (예약완료) 이미지
-//   · [독배] = 배 전체 대절 → 마감
-//
-//  잔여석 = (그 배의 정원) − (예약된 좌석번호의 개수)
-//   · 정원은 좌석표에서 관찰된 최대 좌석번호로 자동 추정(여러 날 중 만석일 때 드러남)
-//   · 남은자리 칸이 '예약완료'거나 [독배]면 0으로 확정
-//
-//  반환(표준 슬롯): { boat, species, date:"9/6", dow:"토", dep:"06:00",
-//                    open, cap, mul, url }
+// 더피싱(thefishing.kr / myfishmap) 플랫폼 예약현황(mid=bk) 파서.
+// PC/모바일 두 형식 모두 대응:
+//   PC   : "2026년 09월 01일, 화요일, 11물"
+//   모바일: "2026년 09월 19일 (토요일)" + 물때(무시)  ← 괄호 형식
+// 좌석: "이름님(15 명/15,14,...)"  ← 숫자와 '명' 사이 공백 허용
+// 마감: 남은자리에 '예약완료'/'예약마감' 또는 r_x_0.gif, [독배]
 
 const MOCK = process.env.MOCK === "1";
-const UA = "Mozilla/5.0 (compatible; BinjariBot/0.1; personal use)";
+const UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36";
 
 export async function fetchAvailability(spot) {
   if (MOCK) return mockSlots(spot);
-  const res = await fetch(spot.reserveUrl, { headers: { "User-Agent": UA } });
+  const res = await fetch(spot.reserveUrl, { headers: { "User-Agent": UA, "Accept-Language": "ko" } });
+  console.log(`[${spot.name}] HTTP ${res.status}`);
   if (!res.ok) throw new Error(`HTTP ${res.status} — ${spot.reserveUrl}`);
   const html = await res.text();
-  const slots = parseReservation(html, (spot.boats || []).map((b) => b.name));
+  console.log(`[${spot.name}] HTML ${html.length}자`);
+  const slots = parseReservation(html, (spot.boats || []).map((b) => b.name), spot.name);
+  console.log(`[${spot.name}] 슬롯 ${slots.length}건`);
   return slots.map((s) => ({ ...s, url: spot.reserveUrl }));
 }
 
-// ── 핵심 파서 (태그 제거된 텍스트 기준) ─────────────────
-export function parseReservation(html, knownBoats = []) {
+export function parseReservation(html, knownBoats = [], label = "") {
   const text = stripToText(html);
 
-  // 날짜 섹션 분리
-  const dateRe = /(\d{4})년\s*0?(\d{1,2})월\s*0?(\d{1,2})일,\s*([일월화수목금토])요일,\s*([가-힣0-9]+)/g;
+  // 날짜 헤더: 쉼표형 / 괄호형 모두 + 물때(선택)
+  const dateRe = /(\d{4})년\s*0?(\d{1,2})월\s*0?(\d{1,2})일\s*,?\s*\(?\s*([일월화수목금토])요일\s*\)?\s*,?\s*([0-9]{1,2}물|조금|무시|사리|대객기|한객기|[가-힣]{1,4}물)?/g;
   const heads = [];
   let m;
   while ((m = dateRe.exec(text)) !== null) {
-    heads.push({ idx: m.index, y: +m[1], mo: +m[2], d: +m[3], dow: m[4], mul: m[5] });
+    heads.push({ idx: m.index, y: +m[1], mo: +m[2], d: +m[3], dow: m[4], mul: m[5] || "-" });
   }
-  if (!heads.length) return [];
+  if (label) console.log(`  [${label}] 날짜 ${heads.length}개 발견`);
+  if (!heads.length) {
+    if (label) console.log(`  [${label}] 날짜 미발견 — 앞부분: ${text.slice(0, 120)}`);
+    return [];
+  }
 
-  // 1차 파스: 배별로 (날짜→예약좌석/마감) 수집, 동시에 정원(최대좌석) 추정
-  const raw = []; // {y,mo,d,dow,mul, boat, seats:Set, soldout, species, dep}
+  const raw = [];
   const capSeen = {};
+  let matchedBoats = 0;
   for (let i = 0; i < heads.length; i++) {
     const seg = text.slice(heads[i].idx, i + 1 < heads.length ? heads[i + 1].idx : text.length);
     const boats = splitBoats(seg, knownBoats);
+    matchedBoats += boats.length;
     for (const b of boats) {
       const seats = seatSet(b.body);
-      const soldout = /\[\[SOLDOUT\]\]/.test(b.body) || /\[독배\]/.test(b.body);
+      const soldout = /예약완료|예약마감|\[\[SOLDOUT\]\]|\[독배\]/.test(b.body);
       const { species, dep } = noticeInfo(b.body);
       capSeen[b.name] = Math.max(capSeen[b.name] || 0, seats.size ? Math.max(...seats) : 0);
       raw.push({ ...heads[i], boat: b.name, seats, soldout, species, dep });
     }
   }
+  if (label) console.log(`  [${label}] 배매칭 ${matchedBoats}회, raw ${raw.length}건`);
 
-  // 2차: 정원으로 잔여석 확정
-  const DOWs = ["일", "월", "화", "수", "목", "금", "토"];
+  const p2 = (n) => String(n).padStart(2, "0");
   return raw.map((r) => {
-    const cap = capSeen[r.boat] || r.seats.size;
+    const cfgCap = (knownBoats.__cap && knownBoats.__cap[r.boat]) || 0;
+    const cap = Math.max(capSeen[r.boat] || 0, cfgCap, r.seats.size);
     const taken = r.seats.size;
     const open = r.soldout ? 0 : Math.max(0, cap - taken);
-    const p2 = (n) => String(n).padStart(2, "0");
-    return {
-      boat: r.boat,
-      species: r.species,
-      date: `${r.mo}/${r.d}`,
-      ymd: `${r.y}-${p2(r.mo)}-${p2(r.d)}`,
-      dow: r.dow,
-      dep: r.dep,
-      open, cap,
-      mul: r.mul,
-    };
+    return { boat: r.boat, species: r.species, date: `${r.mo}/${r.d}`,
+      ymd: `${r.y}-${p2(r.mo)}-${p2(r.d)}`, dow: r.dow, dep: r.dep, open, cap, mul: r.mul };
   });
 }
 
-// HTML → 텍스트. 남은자리 '예약완료' 이미지는 [[SOLDOUT]] 토큰으로 보존.
 function stripToText(html) {
   return String(html)
     .replace(/<img[^>]*r_x_0\.gif[^>]*>/gi, " [[SOLDOUT]] ")
-    .replace(/r_x_0\.gif/gi, " [[SOLDOUT]] ")   // 마크다운/텍스트 폴백
+    .replace(/r_x_0\.gif/gi, " [[SOLDOUT]] ")
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-// 한 날짜 구간을 배별 블록으로 분리.
-// 각 배 블록은 남은자리 토큰([[SOLDOUT]] 또는 숫자)으로 끝난다는 점을 이용하되,
-// 배 이름 경계는 알려진 배 목록으로 잡는다(설정/드롭다운 기반).
+// 배 이름 경계: 설정 배 이름(괄호 suffix는 떼고도 매칭)으로 위치를 잡는다.
 function splitBoats(seg, knownBoats) {
-  let names = knownBoats.slice();
-  if (!names.length) names = boatNamesFromDropdown(seg);
-  // 이름 등장 위치로 경계 산정
+  const names = (knownBoats && knownBoats.length) ? knownBoats : [];
   const marks = [];
-  for (const n of names) {
-    let from = 0, p;
-    while ((p = seg.indexOf(n, from)) !== -1) { marks.push({ i: p, name: n }); from = p + n.length; }
+  for (const full of names) {
+    const base = String(full).replace(/\s*\([^)]*\)\s*$/, "").trim(); // "골드피싱(20)"→"골드피싱"
+    for (const needle of [full, base]) {
+      if (!needle) continue;
+      let from = 0, p;
+      while ((p = seg.indexOf(needle, from)) !== -1) { marks.push({ i: p, name: full, len: needle.length }); from = p + needle.length; }
+    }
   }
   marks.sort((a, b) => a.i - b.i);
-  // 예약현황 표 영역만: 첫 날짜 헤더 이후 첫 배부터
   const out = [];
   for (let k = 0; k < marks.length; k++) {
-    const start = marks[k].i + marks[k].name.length;
+    const start = marks[k].i + marks[k].len;
     const end = k + 1 < marks.length ? marks[k + 1].i : seg.length;
     const body = seg.slice(start, end);
-    // 예약현황 신호(입금/공지/출항/독배/SOLDOUT)가 있는 블록만 채택 → 드롭다운·링크 중복 제거
-    if (/입금|출항|공지|독배|\[\[SOLDOUT\]\]|명\//.test(body)) out.push({ name: marks[k].name, body });
+    if (/입금|출항|공지|독배|예약완료|예약마감|\[\[SOLDOUT\]\]|명\s*\//.test(body)) out.push({ name: marks[k].name, body });
   }
-  // 같은 배가 한 날짜에 여러 번 잡히면 첫 유효 블록만
   const seen = new Set();
   return out.filter((b) => (seen.has(b.name) ? false : (seen.add(b.name), true)));
 }
 
-function boatNamesFromDropdown(seg) {
-  // "선박선택 만석호 낚시대회 헌터호 ... 헤르메스호" 패턴에서 이름 추출(폴백)
-  const m = seg.match(/선박선택\s+([가-힣0-9()\s]+?)\s+(?:리스트형|캘린더형|◀|\d{4}년)/);
-  if (!m) return [];
-  return m[1].split(/\s+/).filter((s) => /호|낚시대회/.test(s));
-}
-
-// "이름님(N명/1,2,3)" 들에서 예약 좌석번호 집합
+// "이름님(15 명/1,2,3)" — 숫자와 '명' 사이 공백 허용
 function seatSet(body) {
   const set = new Set();
-  const re = /\((\d+)명\/([0-9,\s]+)\)/g;
+  const re = /\(\s*\d+\s*명\s*\/\s*([0-9,\s]+)\)/g;
   let m;
   while ((m = re.exec(body)) !== null) {
-    m[2].split(",").forEach((x) => { const n = parseInt(x.trim(), 10); if (n) set.add(n); });
+    m[1].split(",").forEach((x) => { const n = parseInt(x.trim(), 10); if (n) set.add(n); });
   }
   return set;
 }
 
-// 공지에서 어종·출항시각
 function noticeInfo(body) {
   const species = [];
-  if (/쭈꾸미/.test(body)) species.push("쭈꾸미");
-  if (/갑오징어/.test(body)) species.push("갑오징어");
-  if (/백조기/.test(body)) species.push("백조기");
-  if (/우럭/.test(body)) species.push("우럭");
-  if (/광어/.test(body)) species.push("광어");
-  if (/참돔/.test(body)) species.push("참돔");
-  if (/농어/.test(body)) species.push("농어");
+  for (const s of ["쭈꾸미", "갑오징어", "백조기", "우럭", "광어", "참돔", "농어", "갈치"]) if (body.includes(s)) species.push(s);
   let dep = "";
-  let d = body.match(/[▶▣]?\s*출항\s*[:：]?\s*0?(\d{1,2})\s*[시:]/);
-  if (!d) d = body.match(/▶\s*0?(\d{1,2})\s*시/);
+  let d = body.match(/[▶▣]\s*0?(\d{1,2})\s*시/) || body.match(/출항\s*[:：]?\s*0?(\d{1,2})\s*시/);
   if (d) dep = `${String(d[1]).padStart(2, "0")}:00`;
   return { species: species.length ? species : ["기타"], dep };
 }
 
-// ── 오프라인 검증용 MOCK ────────────────────────────
 function rnd(a, b) { const x = Math.sin(a * 928.13 + b * 47.71) * 10000; return x - Math.floor(x); }
 function mockSlots(spot) {
   const DOW = ["일", "월", "화", "수", "목", "금", "토"];
@@ -158,10 +127,10 @@ function mockSlots(spot) {
   const out = []; const today = new Date();
   for (let d = 0; d < 7; d++) {
     const day = new Date(today); day.setDate(today.getDate() + d);
+    const p2 = (n) => String(n).padStart(2, "0");
     for (let bi = 0; bi < boats.length; bi++) {
       const b = boats[bi]; const r = rnd(day.getDate() + d * 3, bi + (spot.uid || 1));
       const open = r < 0.55 ? 0 : Math.min(b.cap, Math.ceil(r * 8));
-      const p2 = (n) => String(n).padStart(2, "0");
       out.push({ boat: b.name, species: [(spot.species || ["쭈꾸미"])[0]], date: `${day.getMonth() + 1}/${day.getDate()}`,
         ymd: `${day.getFullYear()}-${p2(day.getMonth() + 1)}-${p2(day.getDate())}`,
         dow: DOW[day.getDay()], dep: b.dep || "06:00", open, cap: b.cap, mul: "-", url: spot.reserveUrl });
