@@ -4,7 +4,7 @@
 // ── 백엔드(Google Apps Script) 주소 ──
 // 배포한 웹앱 /exec URL을 넣으면 구글 시트에서 데이터를 읽고, 공유한 URL이 시트에 쌓입니다.
 // 비워두면 로컬 data.json 을 사용합니다.
-const API_URL = ""; // 예: "https://script.google.com/macros/s/XXXX/exec"
+const API_URL = "https://script.google.com/macros/s/AKfycbwNycJ8YFtaxd9rYknRg7qXZAYwgbB4l3lNOyxwgs4uiBOMcf0qrnnRvlHa-Cns6a2m/exec"; // 예: "https://script.google.com/macros/s/XXXX/exec"
 
 // ── 팔레트 (CSS 변수와 동일) ──
 const C = { ink:"#0e2a30", inkSoft:"#4a636a", tide:"#2b8896", tideSoft:"#d3e9ea",
@@ -46,7 +46,8 @@ const LS = {
 
 const S = {
   monthOff: 0, species: "전체", sel: null, model: "openmeteo", tab: "cal",
-  subs: new Set(LS.get("subs", [])),
+  subs: LS.get("subsMap", {}),        // boatId → ["2026-09-19~2026-09-20", ...]
+  editBoat: null, editRanges: [], editFrom: "", editTo: "",  // 기간 편집 중
   extra: LS.get("extra", []),          // URL로 추가된 출조점
   speciesList: LS.get("speciesList", BASE_SPECIES),  // 어종 목록(사용자 추가 가능)
   addingSp: false, spDraft: "",
@@ -221,7 +222,8 @@ function renderDetail(y,m,d){
   const boats=boatsForSp(S.species);
   let list="";
   for(const b of boats){
-    const open=seatsOf(b,y,m,d), noData=open===null, soldout=open===0, urgent=open>0&&open<=2, on=S.subs.has(b.id);
+    const open=seatsOf(b,y,m,d), noData=open===null, soldout=open===0, urgent=open>0&&open<=2;
+    const ranges=S.subs[b.id]||[]; const on=ranges.length>0; const editing=S.editBoat===b.id;
     list+=`<div class="card" style="padding:12px;margin-top:8px;${soldout?"opacity:.62":""}">
       <div class="row" style="align-items:flex-start">
         <div style="flex:1">
@@ -240,7 +242,7 @@ function renderDetail(y,m,d){
              ${urgent?`<div style="font-size:10px;font-weight:800;color:${C.urgent};margin-top:2px">마감임박</div>`:""}`}
         </div>
       </div>
-      <button class="subbtn ${on?"on":""}" data-action="sub" data-v="${esc(b.id)}">${on?"🔔 알림 켜짐":"🔕 빈자리 알림"}</button>
+      ${editing ? periodEditor(b) : `<button class="subbtn ${on?"on":""}" data-action="sub" data-v="${esc(b.id)}">${on?`🔔 알림 ${ranges.length}개 기간`:"🔕 빈자리 알림"}</button>`}
     </div>`;
   }
   return `<div style="margin-top:16px">
@@ -315,17 +317,52 @@ function renderAdd(){
   </div>`;
 }
 
+function periodEditor(b){
+  const rows = S.editRanges.length
+    ? S.editRanges.map((r,i)=>`<div class="row gap" style="font-size:12.5px;margin-bottom:4px"><span style="flex:1">📅 ${esc(r.replace("~"," ~ "))}</span><span data-action="rangedel" data-v="${i}" style="color:${C.urgent};font-weight:900;cursor:pointer;padding:0 6px">✕</span></div>`).join("")
+    : `<div style="font-size:12px;color:${C.inkSoft};margin-bottom:6px">아직 지정한 기간이 없어요. 아래에서 추가하세요.</div>`;
+  return `<div style="margin-top:10px;border:1px solid ${C.line};border-radius:12px;padding:12px">
+    <div style="font-size:12.5px;font-weight:800;margin-bottom:8px">🔔 ${esc(b.name)} 알림 기간</div>
+    ${rows}
+    <div class="row gap" style="margin-top:8px">
+      <input type="date" id="edFrom" value="${esc(S.editFrom)}" style="flex:1;border:1px solid ${C.line};border-radius:8px;padding:8px;font-size:12.5px" />
+      <span style="color:${C.inkSoft}">~</span>
+      <input type="date" id="edTo" value="${esc(S.editTo)}" style="flex:1;border:1px solid ${C.line};border-radius:8px;padding:8px;font-size:12.5px" />
+      <button data-action="rangeadd" style="background:${C.tide};color:#fff;border:none;border-radius:8px;padding:0 12px;font-size:12.5px;font-weight:800;cursor:pointer">기간 추가</button>
+    </div>
+    <div class="row gap" style="margin-top:10px">
+      <button data-action="subsave" data-v="${esc(b.id)}" style="flex:1;background:${C.beacon};color:#fff;border:none;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer">저장</button>
+      <button data-action="suboff" data-v="${esc(b.id)}" style="background:#fff;color:${C.urgent};border:1px solid ${C.line};border-radius:10px;padding:10px 12px;font-size:12.5px;font-weight:700;cursor:pointer">알림 끄기</button>
+      <button data-action="editcancel" style="background:#fff;color:${C.inkSoft};border:1px solid ${C.line};border-radius:10px;padding:10px 12px;font-size:12.5px;cursor:pointer">취소</button>
+    </div>
+    <div style="font-size:10.5px;color:${C.inkSoft};margin-top:8px">지정 기간에 빈자리가 뜨면 단톡방으로 알림이 가요.</div>
+  </div>`;
+}
+
+async function submitSub(boatId, boatName, rangesArr){
+  if(!API_URL){ toast("구글 시트(API_URL) 설정 후 저장돼요"); return false; }
+  try{
+    await fetch(API_URL, { method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"},
+      body: JSON.stringify({ action:"savesub", boatId, boatName, ranges: rangesArr.join(",") }) });
+    return true;
+  }catch{ toast("저장 실패 — 네트워크 확인"); return false; }
+}
+
+
 function renderAlerts(){
-  const subBoats=[...S.subs].map(id=>allBoats().find(b=>b.id===id)).filter(Boolean);
-  const body = subBoats.length ? subBoats.map(b=>`<div class="card row" style="padding:13px;margin-bottom:8px">
-      <div style="flex:1">
+  const ids = Object.keys(S.subs);
+  const body = ids.length ? ids.map(id=>{
+    const b = allBoats().find(x=>x.id===id) || {name:id, _port:"", sp:[]};
+    const ranges = S.subs[id]||[];
+    return `<div class="card" style="padding:13px;margin-bottom:8px">
+      <div class="row"><div style="flex:1">
         <div class="row gap">🔔 <span style="font-size:15px;font-weight:800">${esc(b.name)}</span></div>
         <div style="font-size:11.5px;color:${C.inkSoft};margin-top:3px">${esc(b._port||"")} · ${(b.sp||[]).join("·")}</div>
-        <div style="font-size:11px;color:${C.tide};margin-top:3px;font-weight:700">나 · 지인 2명이 함께 보는 중</div>
-      </div>
-      <button data-action="sub" data-v="${esc(b.id)}" style="border:none;background:none;cursor:pointer;font-size:18px">🔔</button>
-    </div>`).join("")
-    : `<div class="card" style="border-style:dashed;padding:28px;text-align:center;color:${C.inkSoft}">🔔<div style="font-size:13px;font-weight:700;color:${C.ink};margin-top:8px">아직 담아둔 배가 없어요</div><div style="font-size:12px;margin-top:4px">캘린더에서 배를 골라 알림을 켜보세요.</div></div>`;
+      </div></div>
+      <div style="margin-top:8px">${ranges.map(r=>`<span style="display:inline-block;font-size:11px;font-weight:700;color:${C.tide};background:${C.tideSoft};border-radius:6px;padding:3px 8px;margin:0 4px 4px 0">📅 ${esc(r.replace("~"," ~ "))}</span>`).join("")}</div>
+    </div>`;
+  }).join("")
+    : `<div class="card" style="border-style:dashed;padding:28px;text-align:center;color:${C.inkSoft}">🔔<div style="font-size:13px;font-weight:700;color:${C.ink};margin-top:8px">아직 알림 설정한 배가 없어요</div><div style="font-size:12px;margin-top:4px">빈자리 탭 → 날짜 → 배의 "빈자리 알림"에서 기간을 지정하세요.</div></div>`;
   return `<div class="pad">
     <div style="font-size:17px;font-weight:800;margin-bottom:4px">빈자리 알림</div>
     <div style="font-size:12px;color:${C.inkSoft};margin-bottom:14px">담아둔 배에 빈자리가 뜨면 텔레그램으로 알려드려요.</div>
@@ -340,7 +377,7 @@ function renderAlerts(){
 
 function renderTabbar(){
   const t=(id,ic,label)=>`<button class="tab ${S.tab===id?"on":""}" data-action="tab" data-v="${id}"><span class="ic">${ic}</span><span>${label}</span></button>`;
-  return `<div class="tabbar">${t("cal","🌊","빈자리")}${t("add","➕","선사추가")}${t("alerts","🔔","알림"+(S.subs.size?" "+S.subs.size:""))}</div>`;
+  return `<div class="tabbar">${t("cal","🌊","빈자리")}${t("add","➕","선사추가")}${t("alerts","🔔","알림"+(Object.keys(S.subs).length?" "+Object.keys(S.subs).length:""))}</div>`;
 }
 
 function renderInstallBar(){
@@ -372,7 +409,19 @@ document.addEventListener("click",(e)=>{
   else if(a==="month"){ S.monthOff+=parseInt(v,10); S.sel=null; render(); }
   else if(a==="day"){ S.sel=parseInt(v,10); render(); }
   else if(a==="model"){ S.model=v; render(); }
-  else if(a==="sub"){ S.subs.has(v)?S.subs.delete(v):S.subs.add(v); LS.set("subs",[...S.subs]); render(); }
+  else if(a==="sub"){ S.editBoat=v; S.editRanges=(S.subs[v]||[]).slice(); S.editFrom=""; S.editTo=""; render(); }
+  else if(a==="editcancel"){ S.editBoat=null; S.editRanges=[]; render(); }
+  else if(a==="rangeadd"){
+    const f=document.getElementById("edFrom"), t=document.getElementById("edTo");
+    const from=f?f.value:"", to=t?t.value:"";
+    if(!from){ toast("시작 날짜를 고르세요"); return; }
+    const range = to && to>=from ? `${from}~${to}` : from;
+    if(!S.editRanges.includes(range)) S.editRanges.push(range);
+    S.editFrom=""; S.editTo=""; render();
+  }
+  else if(a==="rangedel"){ S.editRanges.splice(parseInt(v,10),1); render(); }
+  else if(a==="subsave"){ saveSubForBoat(v); }
+  else if(a==="suboff"){ saveSubForBoat(v, true); }
   else if(a==="tab"){ S.tab=v; render(); }
   else if(a==="fillurl"){ S.urlDraft=v; render(); const i=document.getElementById("urlIn"); if(i)i.focus(); }
   else if(a==="analyze"){ const i=document.getElementById("urlIn"); S.urlDraft=i?i.value:""; S.analyzing=true; S.result=null; render(); setTimeout(()=>{ S.result=analyzeUrl(S.urlDraft); S.analyzing=false; render(); },800); }
@@ -393,6 +442,20 @@ function removeSpecies(name){
   render();
   toast(`${name} 삭제됨`);
 }
+
+function saveSubForBoat(boatId, off){
+  const b = allBoats().find(x=>x.id===boatId) || {name:""};
+  const ranges = off ? [] : S.editRanges.slice();
+  if(!off && ranges.length===0){ toast("기간을 하나 이상 추가하세요"); return; }
+  submitSub(boatId, b.name, ranges).then(ok=>{
+    if(off || ranges.length===0) delete S.subs[boatId]; else S.subs[boatId]=ranges;
+    LS.set("subsMap", S.subs);
+    S.editBoat=null; S.editRanges=[]; render();
+    toast(off?"알림을 껐어요":`${b.name} 알림 ${ranges.length}개 기간 저장`);
+  });
+}
+
+document.addEventListener("input",(e)=>{ if(e.target.id==="edFrom") S.editFrom=e.target.value; if(e.target.id==="edTo") S.editTo=e.target.value; });
 
 function addSpecies(){
   const name = (S.spDraft||"").trim();
@@ -445,6 +508,7 @@ async function boot(){
         if(d.weather && Object.keys(d.weather).length) S.weather = d.weather;
         if(d.submissions && d.submissions.length) S.submissions = d.submissions;
         if(!(S.data.spots && S.data.spots.length) && d.spots && d.spots.length) S.data = d;
+        if(Array.isArray(d.subs)){ const m={}; d.subs.forEach(s=>{ if(s.boatId) m[s.boatId]=s.ranges||[]; }); S.subs=m; LS.set("subsMap",m); }
       }
     }catch{}
   }
