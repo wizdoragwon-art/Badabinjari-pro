@@ -26,7 +26,12 @@ const DEFAULT_DATA = {
   availability: {},
 };
 
-const SPECIES = ["전체","쭈꾸미","갑오징어","백조기","우럭"];
+// 어종별 이모지 (실제 모양에 맞춤: 쭈꾸미=문어류 🐙, 갑오징어=오징어 🦑)
+const SP_EMOJI = { "쭈꾸미":"🐙", "갑오징어":"🦑", "주꾸미":"🐙", "오징어":"🦑", "한치":"🦑",
+  "백조기":"🐟", "우럭":"🐠", "광어":"🐟", "참돔":"🐡", "농어":"🐟", "갈치":"🐟", "고등어":"🐟", "삼치":"🐟" };
+const spEmoji = (n) => SP_EMOJI[n] || "🐟";
+const BASE_SPECIES = ["쭈꾸미", "갑오징어", "백조기"];
+
 const MODELS = [
   { id:"openmeteo", label:"Open-Meteo", sub:"멀티모델(ECMWF 포함)" },
   { id:"ecmwf", label:"ECMWF", sub:"중기 전지구" },
@@ -43,6 +48,8 @@ const S = {
   monthOff: 0, species: "전체", sel: null, model: "openmeteo", tab: "cal",
   subs: new Set(LS.get("subs", [])),
   extra: LS.get("extra", []),          // URL로 추가된 출조점
+  speciesList: LS.get("speciesList", BASE_SPECIES),  // 어종 목록(사용자 추가 가능)
+  addingSp: false, spDraft: "",
   data: DEFAULT_DATA,
   result: null, analyzing: false, urlDraft: "",
   deferredPrompt: null,
@@ -145,6 +152,14 @@ function view(){ return new Date(new Date().getFullYear(), new Date().getMonth()
 
 function renderHeader(){
   const upd = relTime(S.data.updated);
+  const chips = ["전체", ...S.speciesList];
+  const addForm = S.addingSp ? `
+    <div class="row gap" style="margin-top:8px">
+      <input id="spIn" value="${esc(S.spDraft)}" placeholder="어종 입력 (예: 광어)" maxlength="10"
+        style="flex:1;border:none;border-radius:10px;padding:9px 12px;font-size:13px;outline:none;color:#0e2a30" />
+      <button data-action="spadd" style="background:${C.beacon};color:#fff;border:none;border-radius:10px;padding:0 14px;font-size:13px;font-weight:800;cursor:pointer">추가</button>
+      <button data-action="spcancel" style="background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:10px;padding:0 12px;font-size:13px;font-weight:700;cursor:pointer">취소</button>
+    </div>` : "";
   return `<div class="hdr">
     <div class="row gap">
       <span style="font-size:18px">⚓</span>
@@ -153,8 +168,15 @@ function renderHeader(){
     </div>
     <div style="font-size:12px;opacity:.75;margin-top:4px">서해 선상 · 쭈꾸미 · 갑오징어 · 백조기</div>
     <div class="chips">
-      ${SPECIES.map(s=>`<button class="chip ${S.species===s?"on":""}" data-action="species" data-v="${s}">${s==="전체"?s:"🐟 "+s}</button>`).join("")}
+      ${chips.map(s=>{
+        const isCustom = s!=="전체" && !BASE_SPECIES.includes(s);
+        const label = s==="전체"?s:spEmoji(s)+" "+esc(s);
+        const del = (isCustom && S.species===s) ? ` <span data-action="spdel" data-v="${esc(s)}" style="opacity:.85;font-weight:900">✕</span>` : "";
+        return `<button class="chip ${S.species===s?"on":""}" data-action="species" data-v="${esc(s)}">${label}${del}</button>`;
+      }).join("")}
+      <button class="chip" data-action="addsp" title="어종 추가" style="font-weight:800">＋ 어종</button>
     </div>
+    ${addForm}
   </div>`;
 }
 
@@ -205,7 +227,7 @@ function renderDetail(y,m,d){
           <div class="row gap"><span>🚢</span><span style="font-size:15px;font-weight:800">${esc(b.name)}</span>${b.url?`<span style="font-size:9px;font-weight:800;color:${C.ok};background:#d6ede2;border-radius:5px;padding:1px 5px">연동</span>`:""}</div>
           <div style="font-size:11.5px;color:${C.inkSoft};margin-top:4px">📍 ${esc(b._port||"")} · ${esc(b._spot||"")}</div>
           <div class="row" style="gap:10px;font-size:11.5px;color:${C.inkSoft};margin-top:5px"><span>🕕 ${esc(b.dep||"")} 출항</span><span>선비 ${b.fee?b.fee+"만":"문의"}</span></div>
-          <div style="margin-top:6px">${(b.sp||[]).map(s=>`<span class="tag">${esc(s)}</span>`).join("")}</div>
+          <div style="margin-top:6px">${(b.sp||[]).map(s=>`<span class="tag">${spEmoji(s)} ${esc(s)}</span>`).join("")}</div>
           ${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener" style="display:inline-flex;gap:3px;font-size:11px;font-weight:700;margin-top:7px">↗ 예약 사이트에서 확정</a>`:""}
         </div>
         <div style="text-align:right;min-width:66px">
@@ -340,7 +362,11 @@ function toast(msg){ const el=document.getElementById("toast"); if(!el)return; e
 document.addEventListener("click",(e)=>{
   const el=e.target.closest("[data-action]"); if(!el)return;
   const a=el.dataset.action, v=el.dataset.v;
-  if(a==="species"){ S.species=v; S.sel=null; render(); }
+  if(a==="species"){ S.species=v; S.sel=null; S.addingSp=false; render(); }
+  else if(a==="addsp"){ S.addingSp=!S.addingSp; S.spDraft=""; render(); if(S.addingSp){ const el=document.getElementById("spIn"); if(el) el.focus(); } }
+  else if(a==="spadd"){ addSpecies(); }
+  else if(a==="spcancel"){ S.addingSp=false; S.spDraft=""; render(); }
+  else if(a==="spdel"){ removeSpecies(v); }
   else if(a==="month"){ S.monthOff+=parseInt(v,10); S.sel=null; render(); }
   else if(a==="day"){ S.sel=parseInt(v,10); render(); }
   else if(a==="model"){ S.model=v; render(); }
@@ -354,7 +380,28 @@ document.addEventListener("click",(e)=>{
   else if(a==="install"){ doInstall(); }
 });
 // 입력값 유지
-document.addEventListener("input",(e)=>{ if(e.target.id==="urlIn") S.urlDraft=e.target.value; });
+document.addEventListener("input",(e)=>{ if(e.target.id==="urlIn") S.urlDraft=e.target.value; if(e.target.id==="spIn") S.spDraft=e.target.value; });
+// 어종 입력에서 엔터로 추가
+document.addEventListener("keydown",(e)=>{ if(e.target.id==="spIn" && e.key==="Enter"){ e.preventDefault(); addSpecies(); } });
+
+function removeSpecies(name){
+  S.speciesList = S.speciesList.filter(x=>x!==name);
+  LS.set("speciesList", S.speciesList);
+  if(S.species===name) S.species="전체";
+  render();
+  toast(`${name} 삭제됨`);
+}
+
+function addSpecies(){
+  const name = (S.spDraft||"").trim();
+  if(!name){ toast("어종 이름을 입력하세요"); return; }
+  if(name==="전체" || S.speciesList.includes(name)){ toast("이미 있는 어종이에요"); S.addingSp=false; S.spDraft=""; render(); return; }
+  S.speciesList.push(name);
+  LS.set("speciesList", S.speciesList);
+  S.species=name; S.addingSp=false; S.spDraft=""; S.sel=null;
+  render();
+  toast(`${spEmoji(name)} ${name} 추가됨`);
+}
 
 function addOperator(){
   const r=S.result; if(!r||!r.ok)return;
