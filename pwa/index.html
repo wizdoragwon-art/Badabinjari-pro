@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>물때빈자리</title>
+<meta name="theme-color" content="#0e2a30" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" href="icons/favicon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="물때빈자리" />
+<style>
+  :root{
+    --ink:#0e2a30; --ink-soft:#4a636a; --paper:#e8edeb; --card:#fff;
+    --tide:#2b8896; --tide-soft:#d3e9ea; --beacon:#e07d2a; --beacon-soft:#f7e5d1;
+    --full:#9aa6a4; --urgent:#c25236; --line:#d3dcda; --ok:#2f8f6b; --ok-soft:#d6ede2;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    overscroll-behavior-y:none;
+  }
+  #app{max-width:480px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:calc(84px + env(safe-area-inset-bottom));}
+  button{font-family:inherit;}
+  a{color:var(--tide);}
+  .hdr{background:var(--ink);color:#fff;padding:calc(16px + env(safe-area-inset-top)) 18px 16px;}
+  .row{display:flex;align-items:center;}
+  .gap{gap:8px;}
+  .chips{display:flex;gap:6px;margin-top:14px;overflow-x:auto;padding-bottom:2px;}
+  .chip{padding:7px 14px;border-radius:999px;font-size:13px;font-weight:700;white-space:nowrap;border:none;cursor:pointer;background:rgba(255,255,255,.12);color:rgba(255,255,255,.85);}
+  .chip.on{background:var(--beacon);color:#fff;}
+  .pad{padding:14px;}
+  .navbtn{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
+  .dow{text-align:center;font-size:11px;font-weight:700;color:var(--ink-soft);}
+  .cell{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:5px 3px 6px;cursor:pointer;text-align:left;min-height:62px;font:inherit;}
+  .cell:disabled{opacity:.4;cursor:default;}
+  .cell.on{background:var(--ink);border-color:var(--ink);}
+  .cell .d{font-size:12px;font-weight:700;}
+  .cell.on .d{color:#fff;}
+  .cell .open{margin-top:3px;font-size:13px;font-weight:800;line-height:1;color:var(--beacon);}
+  .cell .none{margin-top:3px;font-size:10px;font-weight:700;color:var(--full);}
+  .cell.on .none{color:rgba(255,255,255,.5);}
+  .cell .mul{margin-top:4px;font-size:8.5px;color:var(--ink-soft);}
+  .cell.on .mul,.cell.on .wv{color:rgba(255,255,255,.7);}
+  .cell .wv{display:flex;align-items:center;gap:2px;margin-top:2px;font-size:8px;color:var(--ink-soft);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;}
+  .tag{font-size:10.5px;font-weight:700;color:var(--tide);background:var(--tide-soft);border-radius:6px;padding:2px 7px;margin-right:4px;display:inline-block;}
+  .modelbtn{font-size:10.5px;font-weight:700;padding:5px 9px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-soft);}
+  .modelbtn.on{border-color:var(--tide);background:var(--tide);color:#fff;}
+  .metric{text-align:center;}
+  .metric .v{font-size:15px;font-weight:800;}
+  .metric .l{font-size:9.5px;color:var(--ink-soft);margin-top:1px;}
+  .subbtn{width:100%;margin-top:10px;padding:9px;border-radius:10px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .subbtn.on{border-color:var(--beacon);background:var(--beacon-soft);color:var(--beacon);}
+  .input{flex:1;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;outline:none;}
+  .primary{background:var(--ink);color:#fff;border:none;border-radius:10px;padding:0 14px;font-size:13px;font-weight:800;cursor:pointer;}
+  .tabbar{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);}
+  .tab{flex:1;padding:10px 0 12px;border:none;background:none;cursor:pointer;color:var(--ink-soft);display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;}
+  .tab.on{color:var(--ink);font-weight:800;}
+  .tab .ic{font-size:19px;}
+  .tab.on .ic{filter:none;}
+  .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:999px;font-size:12.5px;font-weight:700;z-index:20;box-shadow:0 4px 16px rgba(0,0,0,.25);display:flex;align-items:center;gap:6px;opacity:0;transition:opacity .2s;pointer-events:none;}
+  .toast.show{opacity:1;}
+  .muted{color:var(--ink-soft);}
+  .installbar{margin:10px 14px 0;background:var(--ink);color:#fff;border-radius:12px;padding:12px 14px;display:none;align-items:center;gap:10px;}
+  .installbar.show{display:flex;}
+  .installbar button{margin-left:auto;background:var(--beacon);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-weight:800;font-size:12px;cursor:pointer;}
+  .wave{width:11px;height:11px;display:inline-block;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="app.js"></script>
+</body>
+</html>

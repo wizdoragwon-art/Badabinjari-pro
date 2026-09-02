@@ -1,0 +1,12 @@
+{
+  "name": "binjari-alert",
+  "version": "0.1.0",
+  "description": "선상 낚시 빈자리 텔레그램 알림 (개인·지인용)",
+  "type": "module",
+  "scripts": {
+    "check": "node check.js",
+    "test:mock": "MOCK=1 DRY_RUN=1 node check.js",
+    "test:send": "MOCK=1 node check.js"
+  },
+  "engines": { "node": ">=18" }
+}

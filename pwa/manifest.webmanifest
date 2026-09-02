@@ -1,0 +1,17 @@
+{
+  "name": "물때빈자리 — 선상 낚시 빈자리",
+  "short_name": "물때빈자리",
+  "description": "서해 선상 낚시 빈자리·물때·날씨를 한 화면에서 확인하는 개인용 앱",
+  "lang": "ko",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#e8edeb",
+  "theme_color": "#0e2a30",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
