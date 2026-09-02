@@ -58,7 +58,6 @@ const S = {
 };
 
 // ── 유틸 ──
-const strSeed = (s) => { let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return ((h>>>0)%100000)/100000; };
 const rnd = (a,b) => { const x=Math.sin(a*928.13+b*47.71)*10000; return x-Math.floor(x); };
 const pad2 = (n)=>String(n).padStart(2,"0");
 const DOW = ["일","월","화","수","목","금","토"];
@@ -70,13 +69,11 @@ function boatsForSp(sp){ const bs=allBoats(); return sp==="전체"?bs:bs.filter(
 function dayIndex(y,m,d){ return Math.round((Date.UTC(y,m,d)-Date.UTC(2024,0,1))/86400000); }
 function ymd(y,m,d){ return `${y}-${pad2(m+1)}-${pad2(d)}`; }
 
-// 잔여석: data.json 우선, 없으면 결정적 자체 생성
+// 잔여석: data.json(봇)에 실데이터가 있으면 그 값, 없으면 null(정보 없음)
 function seatsOf(boat, y, m, d){
-  const key = ymd(y,m,d);
   const av = S.data.availability?.[boat.id];
-  if(av && typeof av[key]==="number") return av[key];
-  const r = strSeed(boat.id+key);
-  return r<0.42 ? 0 : Math.min(boat.cap||20, Math.ceil(r*9));
+  const v = av ? av[ymd(y,m,d)] : undefined;
+  return (typeof v === "number") ? v : null;
 }
 function tideInfo(di){ const mul=((di%15)+15)%15+1; const spring=Math.abs(Math.sin((mul/15)*Math.PI)); const amp=130+spring*190;
   const label = (mul>=7&&mul<=9)?`${mul}물·사리`:(mul<=2||mul>=14)?`${mul}물·조금`:`${mul}물`; return {mul,amp,label}; }
@@ -188,11 +185,14 @@ function renderCalendar(){
   for(let i=0;i<fdow;i++) cells+=`<div></div>`;
   for(let d=1;d<=dim;d++){
     const dt=new Date(y,m,d), past=dt<todayMid, di=dayIndex(y,m,d);
-    let open=0; if(!past) for(const b of boatsForSp(S.species)) open+=seatsOf(b,y,m,d);
+    let sum=0, hasData=false;
+    if(!past) for(const b of boatsForSp(S.species)){ const s=seatsOf(b,y,m,d); if(s!==null){ hasData=true; sum+=s; } }
     const t=tideInfo(di), w=weatherOf(y,m,d,S.model), on=S.sel===d;
     cells+=`<button class="cell ${on?"on":""}" data-action="day" data-v="${d}" ${past?"disabled":""}>
       <div class="d">${d}</div>
-      ${open>0?`<div class="open">빈 ${open}</div>`:`<div class="none">${past?"지남":"마감"}</div>`}
+      ${past ? `<div class="none">지남</div>`
+        : (!hasData ? `<div class="none" style="font-size:9px">정보없음</div>`
+          : (sum>0 ? `<div class="open">빈 ${sum}</div>` : `<div class="none">마감</div>`))}
       <div class="mul">${t.mul}물</div>
       <div class="wv">🌊<span>${w.wave}m</span></div>
     </button>`;
@@ -208,7 +208,7 @@ function renderCalendar(){
     <div class="cal" style="margin-bottom:5px">${DOW.map((d,i)=>`<div class="dow" style="color:${i===0?C.urgent:i===6?C.tide:C.inkSoft}">${d}</div>`).join("")}</div>
     <div class="cal">${cells}</div>
     <div class="row" style="gap:12px;margin-top:12px;font-size:10.5px;color:${C.inkSoft}">
-      <span><b style="color:${C.beacon}">빈 N</b> 빈자리</span><span><b style="color:${C.full}">마감</b> 예약완료</span><span>🌊 파고</span>
+      <span><b style="color:${C.beacon}">빈 N</b> 빈자리</span><span><b style="color:${C.full}">마감</b> 예약완료</span><span><b style="color:${C.inkSoft}">정보없음</b> 미수집</span><span>🌊 파고</span>
     </div>
     ${detail}
   </div>`;
@@ -220,7 +220,7 @@ function renderDetail(y,m,d){
   const boats=boatsForSp(S.species);
   let list="";
   for(const b of boats){
-    const open=seatsOf(b,y,m,d), soldout=open===0, urgent=open>0&&open<=2, on=S.subs.has(b.id);
+    const open=seatsOf(b,y,m,d), noData=open===null, soldout=open===0, urgent=open>0&&open<=2, on=S.subs.has(b.id);
     list+=`<div class="card" style="padding:12px;margin-top:8px;${soldout?"opacity:.62":""}">
       <div class="row" style="align-items:flex-start">
         <div style="flex:1">
@@ -231,7 +231,8 @@ function renderDetail(y,m,d){
           ${b.url?`<a href="${esc(b.url)}" target="_blank" rel="noopener" style="display:inline-flex;gap:3px;font-size:11px;font-weight:700;margin-top:7px">↗ 예약 사이트에서 확정</a>`:""}
         </div>
         <div style="text-align:right;min-width:66px">
-          ${soldout?`<div style="font-size:13px;font-weight:800;color:${C.full}">마감</div>`:
+          ${noData?`<div style="font-size:12px;font-weight:700;color:${C.inkSoft}">정보 없음</div><div style="font-size:9.5px;color:${C.inkSoft};margin-top:2px">예약 사이트 확인</div>`:
+            soldout?`<div style="font-size:13px;font-weight:800;color:${C.full}">마감</div>`:
             `<div style="font-size:20px;font-weight:900;color:${urgent?C.urgent:C.beacon};line-height:1">${open}</div>
              <div style="font-size:10px;color:${C.inkSoft};margin-top:2px">👥 /${b.cap}석</div>
              ${open<(b.minGo||0)?`<div style="font-size:9.5px;color:${C.inkSoft};margin-top:2px">최소 ${b.minGo}인</div>`:""}
