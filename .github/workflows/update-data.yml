@@ -27,6 +27,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SHEET_URL: ${{ secrets.SHEET_URL }}       # 구글 Apps Script /exec URL (구독 읽기)
           DATA_OUT: ../pwa/data.json     # PWA가 읽는 위치로 바로 출력
         run: node check.js
 
