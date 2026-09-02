@@ -23,12 +23,35 @@ function isQuietHour() {
 }
 async function loadJSON(path, fb) { try { return JSON.parse(await readFile(path, "utf8")); } catch { return fb; } }
 
+// 구글 시트(Apps Script)에서 구독 목록을 읽는다: [{boatId, ranges:["2026-09-19~2026-09-20", ...]}]
+async function fetchSubs(sheetUrl) {
+  if (!sheetUrl) { console.log("SHEET_URL 미설정 — 구독 기반 알림 비활성(알림 없음)"); return {}; }
+  try {
+    const res = await fetch(sheetUrl + "?action=subs");
+    const j = await res.json();
+    const map = {};
+    for (const s of (j.subs || [])) map[s.boatId] = parseRanges(s.ranges);
+    console.log(`구독 ${Object.keys(map).length}개 배 로드`);
+    return map;
+  } catch (e) { console.error("구독 조회 실패:", e.message); return {}; }
+}
+function parseRanges(ranges) {
+  return (ranges || []).map(r => {
+    const [a, b] = String(r).split("~").map(x => x.trim());
+    return { from: a, to: b || a };
+  }).filter(x => x.from);
+}
+function inAnyRange(ymd, ranges) {
+  return (ranges || []).some(r => ymd >= r.from && ymd <= r.to);
+}
+
 async function main() {
   if (isQuietHour() && process.env.MOCK !== "1") { console.log("조용시간(KST 01~05시) — 건너뜀"); return; }
 
   const cfg = await loadJSON("./spots.json", { filters: {}, spots: [] });
   const prev = await loadJSON("./state.json", {});
   const f = cfg.filters || {};
+  const subMap = await fetchSubs(process.env.SHEET_URL);  // 시트에서 구독(배+기간) 로드
 
   const next = {};              // 상태(중복 알림 방지): key → open
   const newlyOpen = [];         // 이번에 새로 뜬 빈자리
@@ -55,11 +78,10 @@ async function main() {
       const k = keyOf(spot, s.boat, s.ymd);
       next[k] = s.open;
 
-      // 필터
-      const spOk = !f.species?.length || (s.species || []).some((x) => f.species.includes(x));
-      const isWknd = s.dow === "토" || s.dow === "일";
-      if (!spOk) continue;
-      if (f.weekendOnly && !isWknd) continue;
+      // 알림은 "구독한 배 + 지정 기간"에 새로 뜬 빈자리만
+      const ranges = subMap[boatId];
+      if (!ranges || !ranges.length) continue;          // 구독 안 한 배 → 알림 안 함
+      if (!inAnyRange(s.ymd, ranges)) continue;          // 지정 기간 밖 → 알림 안 함
       if (s.open < (f.minSeats ?? 1)) continue;
 
       const before = prev[k] ?? 0;
