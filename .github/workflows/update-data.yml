@@ -1,1 +1,41 @@
+name: 빈자리 갱신 (텔레그램 알림 + PWA 데이터)
 
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 15분마다 (UTC 기준, 지연 가능)
+  workflow_dispatch: {}       # 수동 실행 버튼
+
+permissions:
+  contents: write             # data.json / state.json 커밋백
+
+concurrency:
+  group: binjari-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 빈자리 확인 → 텔레그램 알림 + pwa/data.json 생성
+        working-directory: telegram-bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DATA_OUT: ../pwa/data.json     # PWA가 읽는 위치로 바로 출력
+        run: node check.js
+
+      - name: 변경분 커밋 (pwa/data.json + telegram-bot/state.json)
+        run: |
+          if [[ -n "$(git status --porcelain pwa/data.json telegram-bot/state.json)" ]]; then
+            git config user.name "binjari-bot"
+            git config user.email "bot@users.noreply.github.com"
+            git add pwa/data.json telegram-bot/state.json
+            git commit -m "update reservations [skip ci]"
+            git push
+          fi
