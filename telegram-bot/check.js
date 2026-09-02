@@ -42,6 +42,7 @@ async function main() {
     let slots = [];
     try { slots = await adapter(spot); }
     catch (e) { console.error(`수집 실패 [${spot.name}]: ${e.message}`); continue; }
+    console.log(`[${spot.name}] 수집 결과 ${slots.length}건, 빈자리>0 ${slots.filter(s=>s.open>0).length}건`);
 
     // PWA용 배 목록(설정 기준) + 잔여석 기록
     const boatMeta = {};
