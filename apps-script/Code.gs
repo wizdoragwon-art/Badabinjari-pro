@@ -39,6 +39,8 @@ function setup() {
   }
   const sub = sheet_('Submissions');
   if (sub.getLastRow() === 0) sub.appendRow(['timestamp', 'url', 'name', 'by', 'note']);
+  const su = sheet_('Subs');
+  if (su.getLastRow() === 0) su.appendRow(['boatId', 'boatName', 'ranges', 'updated']);
   const cf = sheet_('Config');
   if (cf.getLastRow() === 0) {
     cf.appendRow(['key', 'value']);
@@ -58,6 +60,8 @@ function doGet(e) {
   const action = (e && e.parameter && e.parameter.action) || 'data';
   if (action === 'setup') return json_({ ok: true, msg: setup() });
   if (action === 'submit') return json_(appendSubmission_(e.parameter)); // GET 방식 공유(폴백)
+  if (action === 'subs') return json_({ ok: true, subs: readSubs_() });   // 봇이 읽는 구독 목록
+  if (action === 'savesub') return json_(saveSub_(e.parameter));          // GET 방식 저장(폴백)
   return json_(buildData_());
 }
 
@@ -65,7 +69,39 @@ function doPost(e) {
   let body = {};
   try { body = (e.postData && e.postData.contents) ? JSON.parse(e.postData.contents) : (e.parameter || {}); }
   catch (_) { body = e.parameter || {}; }
+  if (body.action === 'savesub') return json_(saveSub_(body));
   return json_(appendSubmission_(body));
+}
+
+// ── 구독(배 + 여러 기간) ──────────────────────────────
+// ranges: "2026-09-19~2026-09-20,2026-10-03~2026-10-10" 형식
+function saveSub_(p) {
+  const boatId = String(p.boatId || '').trim();
+  if (!boatId) return { ok: false, error: 'boatId 필요' };
+  const boatName = String(p.boatName || '');
+  const ranges = String(p.ranges || '').trim(); // 빈 문자열이면 구독 해제
+  const su = sheet_('Subs');
+  if (su.getLastRow() === 0) setup();
+  const rows = su.getDataRange().getValues();
+  let found = -1;
+  for (let i = 1; i < rows.length; i++) if (String(rows[i][0]) === boatId) { found = i + 1; break; }
+  if (!ranges) { // 해제
+    if (found > 0) su.deleteRow(found);
+    return { ok: true, removed: true };
+  }
+  if (found > 0) su.getRange(found, 1, 1, 4).setValues([[boatId, boatName, ranges, new Date()]]);
+  else su.appendRow([boatId, boatName, ranges, new Date()]);
+  return { ok: true };
+}
+
+function readSubs_() {
+  const su = sheet_('Subs');
+  const rows = su.getDataRange().getValues();
+  if (rows.length < 2) return [];
+  return rows.slice(1).filter(r => r[0]).map(r => ({
+    boatId: String(r[0]), boatName: String(r[1]),
+    ranges: String(r[2]).split(',').map(s => s.trim()).filter(Boolean),
+  }));
 }
 
 /** 공유된 URL을 Submissions에 추가 (중복 방지) */
@@ -120,6 +156,7 @@ function buildData_() {
     updated: new Date().toISOString(),
     spots: spots,
     submissions: submissions,
+    subs: readSubs_(),
     weather: getWeather_(cfg),
     availability: {},   // (다음 단계) 스크래퍼가 채움
   };
