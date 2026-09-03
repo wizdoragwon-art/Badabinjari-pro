@@ -60,6 +60,8 @@ const S = {
   extra: LS.get("extra", []),          // URL로 추가된 출조점
   speciesList: LS.get("speciesList", BASE_SPECIES),  // 어종 목록(사용자 추가 가능)
   addingSp: false, spDraft: "",
+  ports: LS.get("ports", null),      // 사용자 편집 항구목록(null=자동)
+  addingPort: false, portDraft: "",
   data: DEFAULT_DATA,
   result: null, analyzing: false, urlDraft: "",
   deferredPrompt: null,
@@ -80,6 +82,22 @@ function boatsForSp(sp){
   return sp==="전체"?bs:bs.filter(b=>(b.sp||[]).includes(sp));
 }
 function portsList(){ const set=[]; for(const s of allSpots()){ if(s.port && !set.includes(s.port)) set.push(s.port); } return set; }
+function activePorts(){ return Array.isArray(S.ports)?S.ports:portsList(); }
+function addPort(){
+  const n=(S.portDraft||"").trim();
+  if(!n){ toast("항구 이름을 입력하세요"); return; }
+  const base=activePorts();
+  if(n==="전체"||base.includes(n)){ toast("이미 있는 항구예요"); S.addingPort=false; S.portDraft=""; render(); return; }
+  S.ports=[...base,n]; LS.set("ports",S.ports);
+  S.port=n; S.addingPort=false; S.portDraft=""; S.sel=null; render();
+  toast(`📍 ${n} 추가됨`);
+}
+function removePort(name){
+  const base=activePorts();
+  S.ports=base.filter(x=>x!==name); LS.set("ports",S.ports);
+  if(S.port===name) S.port="전체";
+  render(); toast(`${name} 삭제됨`);
+}
 // 그날 물높이 비율(0~1): 물때가 클수록(사리) 높게, 조금일수록 낮게
 function tideFrac(di){ const mul=((di%15)+15)%15+1; return Math.round(Math.abs(Math.sin((mul/15)*Math.PI))*100)/100; }
 
@@ -207,14 +225,8 @@ function renderHeader(){
   </div>`;
 }
 
-// 달력 뒤 물 흐름 배경 — 날짜들이 물 위에 이어지는 느낌
-function waterSVG(){
-  let g="";
-  for(let i=0;i<12;i++){ const y=i*9+4; let p=`M0,${y}`;
-    for(let x=0;x<100;x+=8) p+=` Q${x+4},${(y-1.6).toFixed(1)} ${x+8},${y}`;
-    g+=`<path d="${p}" fill="none" stroke="#2b8896" stroke-width="0.5" opacity="0.35"/>`; }
-  return `<svg viewBox="0 0 100 108" preserveAspectRatio="none" width="100%" height="100%" style="display:block">${g}</svg>`;
-}
+// 달력 뒤 물 흐름 배경은 제거됨 (요청)
+
 
 function renderCalendar(){
   const v=view(), y=v.getFullYear(), m=v.getMonth();
@@ -244,11 +256,21 @@ function renderCalendar(){
   }
   const ml=`${y}.${pad2(m+1)}`;
   let detail = S.sel ? renderDetail(y,m,S.sel) : `<div style="margin-top:20px;text-align:center;color:${C.inkSoft};font-size:13px;padding:24px 0">⚓<br>날짜를 눌러 물때·날씨·빈자리 배를 확인하세요.</div>`;
-  const ports=portsList();
-  const portRow = ports.length ? `<div class="ports">
-      <button class="port ${S.port==="전체"?"on":""}" data-action="port" data-v="전체">전체 항구</button>
-      ${ports.map(p=>`<button class="port ${S.port===p?"on":""}" data-action="port" data-v="${esc(p)}">📍 ${esc(p)}</button>`).join("")}
+  const ports=activePorts();
+  const addRow = S.addingPort ? `<div class="row gap" style="margin-bottom:8px">
+      <input id="portIn" value="${esc(S.portDraft)}" placeholder="항구 이름 (예: 격포항)" maxlength="20" style="flex:1;border:1px solid ${C.line};border-radius:8px;padding:8px;font-size:12.5px;outline:none" />
+      <button data-action="portadd2" style="background:${C.tide};color:#fff;border:none;border-radius:8px;padding:0 12px;font-size:12.5px;font-weight:800;cursor:pointer">추가</button>
+      <button data-action="portcancel" style="background:#fff;color:${C.inkSoft};border:1px solid ${C.line};border-radius:8px;padding:0 10px;font-size:12.5px;cursor:pointer">취소</button>
     </div>` : "";
+  const portRow = `<div class="ports">
+      <button class="port ${S.port==="전체"?"on":""}" data-action="port" data-v="전체">전체 항구</button>
+      ${ports.map(p=>{
+        const sel=S.port===p;
+        const del = sel ? ` <span data-action="portdel" data-v="${esc(p)}" style="font-weight:900;opacity:.9">✕</span>` : "";
+        return `<button class="port ${sel?"on":""}" data-action="port" data-v="${esc(p)}">📍 ${esc(p)}${del}</button>`;
+      }).join("")}
+      <button class="port" data-action="portadd" style="font-weight:800">＋ 항구</button>
+    </div>${addRow}`;
   return `<div class="pad">
     <div class="row" style="justify-content:space-between;margin-bottom:10px">
       <button class="navbtn" data-action="month" data-v="-1">◀</button>
@@ -257,10 +279,7 @@ function renderCalendar(){
     </div>
     ${portRow}
     <div class="cal" style="margin-bottom:5px">${DOW.map((d,i)=>`<div class="dow" style="color:${i===0?C.urgent:i===6?C.tide:C.inkSoft}">${d}</div>`).join("")}</div>
-    <div style="position:relative">
-      <div style="position:absolute;inset:0;border-radius:10px;overflow:hidden;pointer-events:none">${waterSVG()}</div>
-      <div class="cal" style="position:relative">${cells}</div>
-    </div>
+    <div class="cal">${cells}</div>
     <div class="row" style="gap:12px;margin-top:12px;font-size:10.5px;color:${C.inkSoft}">
       <span><b style="color:${C.beacon}">빈 N</b> 빈자리</span><span><b style="color:${C.full}">마감</b> 예약완료</span><span><b style="color:${C.inkSoft}">정보없음</b> 미수집</span>${S.port&&S.port!=="전체"?`<span><b style="color:#3fbfa0">▨</b> 물높이(물때)</span>`:`<span>🌊 파고</span>`}
     </div>
@@ -462,7 +481,11 @@ document.addEventListener("click",(e)=>{
   else if(a==="spcancel"){ S.addingSp=false; S.spDraft=""; render(); }
   else if(a==="spdel"){ removeSpecies(v); }
   else if(a==="month"){ S.monthOff+=parseInt(v,10); S.sel=null; render(); }
-  else if(a==="port"){ S.port=v; S.sel=null; render(); }
+  else if(a==="port"){ S.port=v; S.sel=null; S.addingPort=false; render(); }
+  else if(a==="portadd"){ S.addingPort=!S.addingPort; S.portDraft=""; render(); if(S.addingPort){ const el=document.getElementById("portIn"); if(el) el.focus(); } }
+  else if(a==="portadd2"){ addPort(); }
+  else if(a==="portcancel"){ S.addingPort=false; S.portDraft=""; render(); }
+  else if(a==="portdel"){ removePort(v); }
   else if(a==="day"){ S.sel=parseInt(v,10); render(); }
   else if(a==="model"){ S.model=v; render(); }
   else if(a==="sub"){ S.editBoat=v; S.editRanges=(S.subs[v]||[]).slice(); S.editFrom=""; S.editTo=""; render(); }
@@ -487,9 +510,9 @@ document.addEventListener("click",(e)=>{
   else if(a==="install"){ doInstall(); }
 });
 // 입력값 유지
-document.addEventListener("input",(e)=>{ if(e.target.id==="urlIn") S.urlDraft=e.target.value; if(e.target.id==="spIn") S.spDraft=e.target.value; });
-// 어종 입력에서 엔터로 추가
-document.addEventListener("keydown",(e)=>{ if(e.target.id==="spIn" && e.key==="Enter"){ e.preventDefault(); addSpecies(); } });
+document.addEventListener("input",(e)=>{ if(e.target.id==="urlIn") S.urlDraft=e.target.value; if(e.target.id==="spIn") S.spDraft=e.target.value; if(e.target.id==="portIn") S.portDraft=e.target.value; });
+// 어종·항구 입력에서 엔터로 추가
+document.addEventListener("keydown",(e)=>{ if(e.target.id==="spIn" && e.key==="Enter"){ e.preventDefault(); addSpecies(); } if(e.target.id==="portIn" && e.key==="Enter"){ e.preventDefault(); addPort(); } });
 
 function removeSpecies(name){
   S.speciesList = S.speciesList.filter(x=>x!==name);
