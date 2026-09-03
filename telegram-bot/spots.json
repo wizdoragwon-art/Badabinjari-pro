@@ -33,7 +33,7 @@
       "port": "경남 창원 경화항",
       "platform": "sunsang24",
       "reserveUrl": "https://bando.sunsang24.com/ship/schedule_fleet",
-      "months": 2,
+      "months": 3,
       "species": ["갈치"],
       "boats": [
         { "name": "반도호", "cap": 20, "dep": "18:00" }
