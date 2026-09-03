@@ -62,6 +62,7 @@ const S = {
   addingSp: false, spDraft: "",
   ports: LS.get("ports", null),      // 사용자 편집 항구목록(null=자동)
   addingPort: false, portDraft: "",
+  hidden: LS.get("hidden", []),      // 숨긴 배 id 목록
   data: DEFAULT_DATA,
   result: null, analyzing: false, urlDraft: "",
   deferredPrompt: null,
@@ -75,7 +76,8 @@ const pad2 = (n)=>String(n).padStart(2,"0");
 const DOW = ["일","월","화","수","목","금","토"];
 
 function allSpots(){ return [...S.data.spots, ...S.extra]; }
-function allBoats(){ const out=[]; for(const sp of allSpots()) for(const b of (sp.boats||[])) out.push({...b, _spot:sp.name, _port:sp.port}); return out; }
+function allBoats(){ const out=[]; for(const sp of allSpots()) for(const b of (sp.boats||[])) out.push({...b, _spot:sp.name, _port:sp.port}); return out.filter(b=>!(S.hidden||[]).includes(b.id)); }
+function allBoatsRaw(){ const out=[]; for(const sp of allSpots()) for(const b of (sp.boats||[])) out.push({...b, _spot:sp.name, _port:sp.port}); return out; }
 function boatsForSp(sp){
   let bs=allBoats();
   if(S.port && S.port!=="전체") bs=bs.filter(b=>(b._port||"")===S.port);
@@ -313,7 +315,10 @@ function renderDetail(y,m,d){
              ${urgent?`<div style="font-size:10px;font-weight:800;color:${C.urgent};margin-top:2px">마감임박</div>`:""}`}
         </div>
       </div>
-      ${editing ? periodEditor(b) : `<button class="subbtn ${on?"on":""}" data-action="sub" data-v="${esc(b.id)}">${on?`🔔 알림 ${ranges.length}개 기간`:"🔕 빈자리 알림"}</button>`}
+      ${editing ? periodEditor(b) : `<div class="row" style="gap:8px;margin-top:10px">
+        <button class="subbtn ${on?"on":""}" style="margin-top:0;flex:1" data-action="sub" data-v="${esc(b.id)}">${on?`🔔 알림 ${ranges.length}개 기간`:"🔕 빈자리 알림"}</button>
+        <button data-action="boatdel" data-v="${esc(b.id)}" title="이 배 숨기기" style="border:1px solid ${C.line};background:#fff;color:${C.inkSoft};border-radius:10px;padding:9px 11px;font-size:12.5px;font-weight:700;cursor:pointer">🗑</button>
+      </div>`}
     </div>`;
   }
   return `<div style="margin-top:16px">
@@ -371,7 +376,7 @@ function renderAdd(){
     </div>`;
   }
   const added = S.extra.length?`<div style="margin-top:16px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">연동된 선사(이 기기)</div>${S.extra.map((sp,i)=>`<div class="card row gap" style="padding:9px 12px;margin-bottom:6px">✅ <span style="font-size:13px;font-weight:700">${esc(sp.name)}</span><span style="font-size:11px;color:${C.inkSoft};flex:1">${esc(sp.port)}</span><span data-action="extradel" data-v="${i}" style="color:${C.urgent};font-weight:900;cursor:pointer;padding:0 4px">✕</span></div>`).join("")}<div style="font-size:10.5px;color:${C.inkSoft};margin-top:2px">실데이터·정확한 배 이름은 봇(spots.json)에 추가해야 나와요.</div></div>`:"";
-  const shared = S.submissions.length?`<div style="margin-top:16px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">지인이 공유한 곳 ${S.submissions.length}</div>${S.submissions.slice().reverse().slice(0,12).map(s=>`<div class="card" style="padding:10px 12px;margin-bottom:6px"><div style="font-size:12.5px;font-weight:700">${esc(s.name||s.url)}</div><div style="font-size:11px;color:${C.inkSoft};word-break:break-all">${esc(s.url)}</div><button data-action="fillurl" data-v="${esc(s.url)}" style="margin-top:6px;font-size:11px;color:${C.tide};background:none;border:none;cursor:pointer;padding:0;font-weight:700">이 주소 분석 →</button></div>`).join("")}</div>`:"";
+  const hiddenList = (S.hidden&&S.hidden.length)?`<div style="margin-top:16px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">숨긴 배 ${S.hidden.length}척</div>${S.hidden.map(id=>{const b=allBoatsRaw().find(x=>x.id===id);return `<div class="card row gap" style="padding:9px 12px;margin-bottom:6px">🗑 <span style="font-size:13px;font-weight:700;flex:1">${esc(b?b.name:id)}</span><button data-action="boatshow" data-v="${esc(id)}" style="border:1px solid ${C.line};background:#fff;color:${C.tide};border-radius:8px;padding:5px 10px;font-size:11.5px;font-weight:700;cursor:pointer">복원</button></div>`;}).join("")}</div>`:"";
   return `<div class="pad">
     <div style="font-size:17px;font-weight:800">선사 추가</div>
     <div style="font-size:12px;color:${C.inkSoft};margin-top:4px;line-height:1.6">예약 사이트 주소를 넣으면 플랫폼을 감지해 배·예약현황을 연동해요.</div>
@@ -387,6 +392,7 @@ function renderAdd(){
     </div>
     ${res}
     ${added}
+    ${hiddenList}
     ${shared}
   </div>`;
 }
@@ -506,6 +512,8 @@ document.addEventListener("click",(e)=>{
   else if(a==="analyze"){ const i=document.getElementById("urlIn"); S.urlDraft=i?i.value:""; S.analyzing=true; S.result=null; render(); setTimeout(()=>{ S.result=analyzeUrl(S.urlDraft); S.analyzing=false; render(); },800); }
   else if(a==="addop"){ addOperator(); }
   else if(a==="extradel"){ const i=parseInt(v,10); const nm=S.extra[i]?.name||""; S.extra.splice(i,1); LS.set("extra",S.extra); render(); toast(`${nm} 삭제됨`); }
+  else if(a==="boatdel"){ if(!S.hidden.includes(v)){ S.hidden.push(v); LS.set("hidden",S.hidden); } const nm=allBoatsRaw().find(x=>x.id===v)?.name||"배"; render(); toast(`${nm} 숨김 (선사추가 탭에서 복원)`); }
+  else if(a==="boatshow"){ S.hidden=S.hidden.filter(x=>x!==v); LS.set("hidden",S.hidden); render(); toast("배를 다시 표시해요"); }
   else if(a==="tg"){ toast("알림봇 저장소 README의 텔레그램 설정을 따라주세요"); }
   else if(a==="share"){ submitUrl(S.urlDraft, (S.result&&S.result.ok)?S.result.name:""); }
   else if(a==="install"){ doInstall(); }
