@@ -41,6 +41,47 @@ const SP_BG = {
 };
 const bgFor = (n) => SP_BG[n] || "img/bada.jpg";
 
+// 내장 낚시 항구(선상낚시 주요 출항지) — 지오코딩에 없는 '○○항'을 커버
+const HARBORS = [
+  // 서해
+  {n:"삼길포항", r:"충남 서산", lat:36.99, lon:126.35},
+  {n:"오천항", r:"충남 보령", lat:36.31, lon:126.50},
+  {n:"대천항", r:"충남 보령", lat:36.29, lon:126.51},
+  {n:"무창포항", r:"충남 보령", lat:36.26, lon:126.53},
+  {n:"홍원항", r:"충남 서천", lat:36.05, lon:126.53},
+  {n:"남당항", r:"충남 홍성", lat:36.44, lon:126.49},
+  {n:"안흥항", r:"충남 태안", lat:36.68, lon:126.15},
+  {n:"신진도항", r:"충남 태안", lat:36.68, lon:126.14},
+  {n:"몽산포항", r:"충남 태안", lat:36.66, lon:126.30},
+  {n:"당진 한진포구", r:"충남 당진", lat:36.98, lon:126.77},
+  {n:"왜목항", r:"충남 당진", lat:37.00, lon:126.65},
+  {n:"격포항", r:"전북 부안", lat:35.62, lon:126.46},
+  {n:"군산항", r:"전북 군산", lat:35.98, lon:126.61},
+  {n:"궁평항", r:"경기 화성", lat:37.11, lon:126.68},
+  {n:"전곡항", r:"경기 화성", lat:37.23, lon:126.60},
+  {n:"제부도", r:"경기 화성", lat:37.16, lon:126.62},
+  {n:"방아머리항", r:"경기 안산", lat:37.28, lon:126.57},
+  {n:"영흥도 진두항", r:"인천 옹진", lat:37.24, lon:126.48},
+  {n:"연평도", r:"인천 옹진", lat:37.66, lon:125.70},
+  // 남해
+  {n:"경화항", r:"경남 창원", lat:35.13, lon:128.66},
+  {n:"통영항", r:"경남 통영", lat:34.84, lon:128.42},
+  {n:"삼천포항", r:"경남 사천", lat:34.92, lon:128.07},
+  {n:"여수항", r:"전남 여수", lat:34.74, lon:127.74},
+  {n:"녹동항", r:"전남 고흥", lat:34.53, lon:127.13},
+  // 동해
+  {n:"속초항", r:"강원 속초", lat:38.21, lon:128.59},
+  {n:"주문진항", r:"강원 강릉", lat:37.89, lon:128.83},
+  {n:"후포항", r:"경북 울진", lat:36.68, lon:129.45},
+  {n:"감포항", r:"경북 경주", lat:35.81, lon:129.50},
+];
+function searchHarbors(q){
+  const nq=q.replace(/항$|포구$|포$/,"").trim();
+  return HARBORS.filter(h=>{ const hb=h.n.replace(/항$|포구$/,"");
+    return h.n.includes(q) || h.n.includes(nq) || (nq && hb.includes(nq)) || (nq && nq.includes(hb));
+  });
+}
+
 const MODELS = [
   { id:"openmeteo", label:"Open-Meteo", sub:"멀티모델(ECMWF 포함)" },
   { id:"ecmwf", label:"ECMWF", sub:"중기 전지구" },
@@ -98,21 +139,21 @@ function addPort(){
   S.port=n; S.addingPort=false; S.portDraft=""; S.portResults=[]; S.sel=null; render();
   toast(`📍 ${n} 추가됨`);
 }
-// 지명 검색(Open-Meteo Geocoding, 키 불필요)
+// 항구 검색: 내장 낚시항구 우선 → Open-Meteo 지명 검색 폴백
 async function searchPorts(){
   const q=(S.portDraft||"").trim();
   if(!q){ toast("검색어를 입력하세요"); return; }
-  S.portSearching=true; S.portResults=[]; render();
+  const local=searchHarbors(q).map(h=>({name:h.n, lat:h.lat, lon:h.lon, admin:h.r, cc:"KR", harbor:true}));
+  S.portResults=local; S.portSearching=true; render();
   try{
-    const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=ko&format=json`);
+    const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q.replace(/항$|포구$/,""))}&count=6&language=ko&format=json`);
     const j=await r.json();
-    S.portResults=(j.results||[]).map(x=>({
+    const seen=new Set(local.map(x=>x.name));
+    (j.results||[]).forEach(x=>{ if(!seen.has(x.name)){ S.portResults.push({
       name:x.name, lat:x.latitude, lon:x.longitude,
-      admin:[x.admin1,x.admin2].filter(Boolean).join(" "), cc:x.country_code||""
-    }));
-    if(!S.portResults.length) toast("결과 없음 — 인근 지명으로 검색하거나 이름만 추가하세요");
-  }catch{ toast("검색 실패 — 네트워크 확인"); }
-  finally{ S.portSearching=false; render(); }
+      admin:[x.admin1,x.admin2].filter(Boolean).join(" "), cc:x.country_code||"" }); seen.add(x.name); } });
+  }catch{/* 오프라인: 내장 결과만 */}
+  finally{ S.portSearching=false; if(!S.portResults.length) toast("결과 없음 — 인근 지명으로 검색하거나 이름만 추가하세요"); render(); }
 }
 function pickPort(i){
   const r=S.portResults[i]; if(!r) return;
@@ -344,8 +385,8 @@ function renderCalendar(){
   const ports=activePorts();
   const results = S.portResults.length ? `<div class="card" style="margin-bottom:8px;padding:4px">
       ${S.portResults.map((r,i)=>`<div data-action="portpick" data-v="${i}" style="padding:9px 10px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px">
-        <span>📍</span><span style="font-size:13px;font-weight:700">${esc(r.name)}</span>
-        <span style="font-size:11px;color:${C.inkSoft};flex:1">${esc(r.admin)}${r.cc&&r.cc!=="KR"?" · "+esc(r.cc):""}</span>
+        <span>${r.harbor?"🎣":"📍"}</span><span style="font-size:13px;font-weight:700">${esc(r.name)}</span>
+        <span style="font-size:11px;color:${C.inkSoft};flex:1">${esc(r.admin)}${r.harbor?" · 낚시항구":""}${r.cc&&r.cc!=="KR"?" · "+esc(r.cc):""}</span>
         <span style="font-size:11px;color:${C.tide};font-weight:700">선택</span></div>`).join("")}
     </div>` : "";
   const addRow = S.addingPort ? `<div style="margin-bottom:8px">
