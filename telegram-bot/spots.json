@@ -39,6 +39,17 @@
         { "name": "반도호", "cap": 20, "dep": "18:00" }
       ],
       "_note": "선상24는 {선사}.sunsang24.com 서브도메인마다 예약 페이지가 있습니다. 내가 다니는 서해 쭈꾸미 선사의 주소로 reserveUrl(.../ship/schedule_fleet)과 boats를 바꾸세요. months=2면 이번 달+다음 달을 봅니다."
+    },
+    {
+      "name": "남당항 은가비호",
+      "port": "충남 홍성 남당항",
+      "platform": "sunsang24",
+      "reserveUrl": "https://eungabi.sunsang24.com/ship/schedule_fleet",
+      "months": 3,
+      "species": ["쭈꾸미", "갈치"],
+      "boats": [
+        { "name": "은가비호", "cap": 24, "dep": "05:00" }
+      ]
     }
   ]
 }
