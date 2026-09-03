@@ -19,7 +19,7 @@ const keyOf = (spot, boat, ymd) => `${spot.uid || slug(spot.name)}|${boat}|${ymd
 function isQuietHour() {
   const kst = new Date(Date.now() + 9 * 3600 * 1000);
   const h = kst.getUTCHours();
-  return h >= 1 && h < 5;
+  return !(h >= 8 && h < 23);  // KST 08~23시에만 작동, 그 외 조용시간
 }
 async function loadJSON(path, fb) { try { return JSON.parse(await readFile(path, "utf8")); } catch { return fb; } }
 
@@ -46,7 +46,7 @@ function inAnyRange(ymd, ranges) {
 }
 
 async function main() {
-  if (isQuietHour() && process.env.MOCK !== "1") { console.log("조용시간(KST 01~05시) — 건너뜀"); return; }
+  if (isQuietHour() && process.env.MOCK !== "1") { console.log("조용시간(KST 23~08시) — 건너뜀"); return; }
 
   const cfg = await loadJSON("./spots.json", { filters: {}, spots: [] });
   const prev = await loadJSON("./state.json", {});
