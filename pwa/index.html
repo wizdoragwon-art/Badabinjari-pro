@@ -68,8 +68,8 @@
   .subbtn.on{border-color:var(--beacon);background:var(--beacon-soft);color:var(--beacon);}
   .input{flex:1;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;outline:none;}
   .primary{background:var(--ink);color:#fff;border:none;border-radius:10px;padding:0 14px;font-size:13px;font-weight:800;cursor:pointer;}
-  .tabbar{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);}
-  .tab{flex:1;padding:10px 0 12px;border:none;background:none;cursor:pointer;color:var(--ink-soft);display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;}
+  .tabbar{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:100;}
+  .tab{flex:1;padding:10px 0 12px;border:none;background:none;cursor:pointer;color:var(--ink-soft);display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;position:relative;z-index:101;}
   .tab.on{color:var(--ink);font-weight:800;}
   .tab .ic{font-size:19px;}
   .tab.on .ic{filter:none;}

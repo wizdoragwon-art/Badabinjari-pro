@@ -125,8 +125,7 @@ function allSpots(){ return [...S.data.spots, ...S.extra]; }
 function allBoats(){ const out=[]; for(const sp of allSpots()) for(const b of (sp.boats||[])) out.push({...b, _spot:sp.name, _port:sp.port}); return out.filter(b=>!(S.hidden||[]).includes(b.id)); }
 function allBoatsRaw(){ const out=[]; for(const sp of allSpots()) for(const b of (sp.boats||[])) out.push({...b, _spot:sp.name, _port:sp.port}); return out; }
 function boatsForSp(sp){
-  let bs=allBoats();
-  if(S.port && S.port!=="전체") bs=bs.filter(b=>(b._port||"")===S.port);
+  const bs=allBoats();   // 배 목록은 항구와 무관하게 항상 전체 (항구는 날씨·물때·물높이 기준으로만 사용)
   return sp==="전체"?bs:bs.filter(b=>(b.sp||[]).includes(sp));
 }
 function portsList(){ const set=[]; for(const s of allSpots()){ if(s.port && !set.includes(s.port)) set.push(s.port); } return set; }
@@ -180,9 +179,9 @@ function tideOf(sp,y,m,d){ return sp&&sp.ocean&&sp.ocean.tide&&sp.ocean.tide[ymd
 function tideFillReal(sp,y,m,d){
   const oc=sp&&sp.ocean&&sp.ocean.tide; if(!oc) return null;
   const t=oc[ymd(y,m,d)]; if(!t) return null;
-  let mn=1e9,mx=-1; for(const k in oc){ const r=oc[k].range; if(r<mn)mn=r; if(r>mx)mx=r; }
-  if(mx<=mn) return 0.6;
-  return Math.max(0.06, Math.min(1, (t.range-mn)/(mx-mn)));
+  // 바다타임식 절대 기준: 그날 조차(cm)를 서해 대조차 고정 스케일로 (조금~130cm=12%, 사리~810cm=100%)
+  const base=Math.max(0,Math.min(1,(t.range-130)/(810-130)));
+  return Math.max(0.05, Math.min(1, 0.12 + base*0.88));
 }
 
 function dayIndex(y,m,d){ return Math.round((Date.UTC(y,m,d)-Date.UTC(2024,0,1))/86400000); }
@@ -432,6 +431,7 @@ function renderCalendar(){
       <button class="navbtn" data-action="month" data-v="1">▶</button>
     </div>
     ${portRow}
+    ${(S.port!=="전체") ? `<div style="font-size:10.5px;color:${C.inkSoft};margin-bottom:8px;padding:0 2px">📍 날씨·물때·물높이는 <b style="color:${C.ink}">${esc(S.port)}</b> 기준 · 빈자리 배는 전체 표시</div>` : ""}
     <div class="cal" style="margin-bottom:5px">${DOW.map((d,i)=>`<div class="dow" style="color:${i===0?C.urgent:i===6?C.tide:C.inkSoft}">${d}</div>`).join("")}</div>
     <div class="cal">${cells}</div>
     <div class="row" style="gap:12px;margin-top:12px;font-size:10.5px;color:${C.inkSoft}">
