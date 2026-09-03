@@ -391,7 +391,7 @@ function renderCalendar(){
       <div class="cellin">
         <div class="d">${d}</div>
         ${past ? `<div class="none">지남</div>`
-          : (!hasData ? `<div class="none" style="font-size:9px">정보없음</div>`
+          : (!hasData ? (S.loading ? `<div class="none" style="font-size:8.5px;color:${C.tide}">불러오는중</div>` : `<div class="none" style="font-size:9px">정보없음</div>`)
             : (sum>0 ? `<div class="open">빈 ${sum}</div>` : `<div class="none">마감</div>`))}
         <div class="mul">${t.mul}물</div>
         <div class="wv" style="justify-content:center;gap:3px;font-size:9px"><span title="오전">${ap.am}</span><span title="오후">${ap.pm}</span></div>
@@ -743,14 +743,20 @@ async function doInstall(){
 
 // ── 데이터 로드 + 부팅 ──
 async function boot(){
+  S.loading = true;
   S.wx = LS.get("wxCache", {}) || {};   // 오프라인 폴백(마지막 실날씨)
+  const cached = LS.get("dataCache", null);   // 지난번 실데이터를 즉시 표시
+  if(cached && cached.spots && cached.spots.length){
+    S.data = cached;
+    if(cached.submissions) S.submissions = cached.submissions;
+  }
   render();
   ensureWeather();                       // 기본 항구 실날씨 로드
   // 1) 빈자리·출조점: data.json(텔레그램 봇이 갱신) 우선
   try{
     const r = await fetch("data.json", { cache:"no-cache" });
     if(r.ok){ const d = await r.json();
-      if(d && d.spots && d.spots.length) S.data = d;
+      if(d && d.spots && d.spots.length){ S.data = d; LS.set("dataCache", d); }
       if(d && d.weather) S.weather = d.weather;
       if(d && d.submissions) S.submissions = d.submissions;
     }
@@ -766,6 +772,7 @@ async function boot(){
       }
     }catch{}
   }
+  S.loading = false;
   render();
   ensureWeather();   // 데이터 로드 후 좌표 확정되면 다시 시도
 }
