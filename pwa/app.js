@@ -153,8 +153,8 @@ function analyzeUrl(raw){
       name:isSub?`선상24 · ${sub}`:"선상24 (선사 선택 필요)", port:"전국",
       species:["갈치","쭈꾸미","갑오징어"],
       reserveUrl:isSub?`https://${sub}.sunsang24.com/ship/schedule_fleet`:raw,
-      boats:isSub?[{name:"관심 배",cap:20}]:[],
-      notes:isSub?["schedule_fleet에서 남은자리를 직접 파싱 — 좌석 계산 불필요","물때·어종·운항시각 함께 수집"]
+      boats:isSub?[{name:sub,cap:20}]:[],
+      notes:isSub?["schedule_fleet에서 남은자리를 직접 파싱 — 좌석 계산 불필요","배 이름은 봇이 예약현황을 읽으면 실제 이름으로 채워집니다","정확한 실데이터는 spots.json(봇)에 추가하세요"]
                  :["www 집계 페이지 — 원하는 선사의 서브도메인(○○.sunsang24.com)을 골라 연동하세요"] };
   }
   if(/mscufishing|thefishing|myfishmap|fishmap/.test(url)){
@@ -370,7 +370,7 @@ function renderAdd(){
       </div>
     </div>`;
   }
-  const added = S.extra.length?`<div style="margin-top:16px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">연동된 선사</div>${S.extra.map(sp=>`<div class="card row gap" style="padding:9px 12px;margin-bottom:6px">✅ <span style="font-size:13px;font-weight:700">${esc(sp.name)}</span><span style="font-size:11px;color:${C.inkSoft}">${esc(sp.port)}</span></div>`).join("")}</div>`:"";
+  const added = S.extra.length?`<div style="margin-top:16px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">연동된 선사(이 기기)</div>${S.extra.map((sp,i)=>`<div class="card row gap" style="padding:9px 12px;margin-bottom:6px">✅ <span style="font-size:13px;font-weight:700">${esc(sp.name)}</span><span style="font-size:11px;color:${C.inkSoft};flex:1">${esc(sp.port)}</span><span data-action="extradel" data-v="${i}" style="color:${C.urgent};font-weight:900;cursor:pointer;padding:0 4px">✕</span></div>`).join("")}<div style="font-size:10.5px;color:${C.inkSoft};margin-top:2px">실데이터·정확한 배 이름은 봇(spots.json)에 추가해야 나와요.</div></div>`:"";
   const shared = S.submissions.length?`<div style="margin-top:16px"><div style="font-size:13px;font-weight:800;margin-bottom:8px">지인이 공유한 곳 ${S.submissions.length}</div>${S.submissions.slice().reverse().slice(0,12).map(s=>`<div class="card" style="padding:10px 12px;margin-bottom:6px"><div style="font-size:12.5px;font-weight:700">${esc(s.name||s.url)}</div><div style="font-size:11px;color:${C.inkSoft};word-break:break-all">${esc(s.url)}</div><button data-action="fillurl" data-v="${esc(s.url)}" style="margin-top:6px;font-size:11px;color:${C.tide};background:none;border:none;cursor:pointer;padding:0;font-weight:700">이 주소 분석 →</button></div>`).join("")}</div>`:"";
   return `<div class="pad">
     <div style="font-size:17px;font-weight:800">선사 추가</div>
@@ -416,8 +416,8 @@ function periodEditor(b){
 async function submitSub(boatId, boatName, rangesArr){
   if(!API_URL){ toast("구글 시트(API_URL) 설정 후 저장돼요"); return false; }
   try{
-    await fetch(API_URL, { method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body: JSON.stringify({ action:"savesub", boatId, boatName, ranges: rangesArr.join(",") }) });
+    const q=`?action=savesub&boatId=${encodeURIComponent(boatId)}&boatName=${encodeURIComponent(boatName||"")}&ranges=${encodeURIComponent(rangesArr.join(","))}`;
+    await fetch(API_URL+q);
     return true;
   }catch{ toast("저장 실패 — 네트워크 확인"); return false; }
 }
@@ -505,6 +505,7 @@ document.addEventListener("click",(e)=>{
   else if(a==="fillurl"){ S.urlDraft=v; render(); const i=document.getElementById("urlIn"); if(i)i.focus(); }
   else if(a==="analyze"){ const i=document.getElementById("urlIn"); S.urlDraft=i?i.value:""; S.analyzing=true; S.result=null; render(); setTimeout(()=>{ S.result=analyzeUrl(S.urlDraft); S.analyzing=false; render(); },800); }
   else if(a==="addop"){ addOperator(); }
+  else if(a==="extradel"){ const i=parseInt(v,10); const nm=S.extra[i]?.name||""; S.extra.splice(i,1); LS.set("extra",S.extra); render(); toast(`${nm} 삭제됨`); }
   else if(a==="tg"){ toast("알림봇 저장소 README의 텔레그램 설정을 따라주세요"); }
   else if(a==="share"){ submitUrl(S.urlDraft, (S.result&&S.result.ok)?S.result.name:""); }
   else if(a==="install"){ doInstall(); }
@@ -594,13 +595,14 @@ async function boot(){
   render();
 }
 
-// 공유된 URL을 시트에 등록 (text/plain 이라 CORS 프리플라이트 없음)
+// 공유된 URL을 시트에 등록 (GET 방식이 Apps Script에서 가장 안정적)
 async function submitUrl(url, name){
   url = (url||"").trim();
   if(!url){ toast("먼저 주소를 입력하세요"); return; }
   if(!API_URL){ toast("백엔드(API_URL) 설정 후 공유돼요"); return; }
   try{
-    await fetch(API_URL, { method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"}, body: JSON.stringify({url, name, by:"me"}) });
+    const q=`?action=submit&url=${encodeURIComponent(url)}&name=${encodeURIComponent(name||"")}&by=me`;
+    await fetch(API_URL+q);
     toast("시트에 공유했어요");
     boot();
   }catch{ toast("공유 실패 — 네트워크 확인"); }
