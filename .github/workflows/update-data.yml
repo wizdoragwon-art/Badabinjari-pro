@@ -2,7 +2,9 @@ name: 빈자리 갱신 (텔레그램 알림 + PWA 데이터)
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # 15분마다 (UTC 기준, 지연 가능)
+    # 30분마다, KST 08~23시에만 (UTC 23시 + 0~13시). GitHub 부하로 지연 가능.
+    - cron: "0,30 23 * * *"
+    - cron: "0,30 0-13 * * *"
   workflow_dispatch: {}       # 수동 실행 버튼
 
 permissions:
