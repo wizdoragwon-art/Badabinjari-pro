@@ -224,7 +224,7 @@ async function ensureWeather(){
   if(S.wx[k]||S.wxLoading[k]) return;
   S.wxLoading[k]=true;
   try{
-    const days=14, tz="Asia%2FSeoul";
+    const days=16, tz="Asia%2FSeoul";
     const f=`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&hourly=temperature_2m,wind_speed_10m,precipitation_probability&wind_speed_unit=ms&timezone=${tz}&forecast_days=${days}`;
     const m=`https://marine-api.open-meteo.com/v1/marine?latitude=${c.lat}&longitude=${c.lon}&hourly=wave_height&timezone=${tz}&forecast_days=${days}`;
     const [fr,mr]=await Promise.all([fetch(f), fetch(m).catch(()=>null)]);
@@ -489,7 +489,7 @@ function renderDetail(y,m,d){
         <div style="font-size:12px;font-weight:700;color:${C.inkSoft}">기상 예보</div>
         <div class="row" style="gap:4px">${MODELS.map(md=>`<button class="modelbtn ${S.model===md.id?"on":""}" data-action="model" data-v="${md.id}">${md.label}</button>`).join("")}</div>
       </div>
-      <div style="font-size:10px;color:${C.inkSoft};margin-bottom:10px">${w._real?"소스: 실측 · Open-Meteo(항구별·오전/오후)":"소스: 데모값 (실측 로딩 중이거나 예보 범위 밖)"}</div>
+      <div style="font-size:10px;color:${C.inkSoft};margin-bottom:10px">${w._real?"소스: 실측 · Open-Meteo(항구별·오전/오후)":"소스: 참고용 데모 · 실측 예보는 약 16일 이내만 제공"}</div>
       <div class="cal" style="grid-template-columns:repeat(4,1fr)">
         ${metric("🌡️",w.temp+"°","기온")}${metric("🌊",w.wave+"m","파고",w.wave>1.5)}${metric("💨",w.wind,"풍속 m/s",w.wind>10)}${metric("💧",w.rain+"%","강수")}
       </div>
