@@ -99,7 +99,7 @@ async function main() {
       cap: b.cap || 0, minGo: b.minGo || Math.round((b.cap || 0) * 0.5),
       url: spot.reserveUrl,
     }));
-    if (boatsForPwa.length) pwaSpots.push({ name: spot.name, port: spot.port || "", boats: boatsForPwa });
+    if (boatsForPwa.length) pwaSpots.push({ name: spot.name, port: spot.port || "", lat: spot.lat ?? null, lon: spot.lon ?? null, boats: boatsForPwa });
   }
 
   // 1) 텔레그램 알림
