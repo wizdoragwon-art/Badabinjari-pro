@@ -107,6 +107,7 @@ const S = {
   portCoords: LS.get("portCoords", {}),   // 사용자 추가 항구 좌표: {name:{lat,lon}}
   portResults: [], portSearching: false,
   hidden: LS.get("hidden", []),      // 숨긴 배 id 목록
+  hideFull: LS.get("hideFull", false),  // 마감 제외(빈자리만 보기)
   data: DEFAULT_DATA,
   result: null, analyzing: false, urlDraft: "",
   deferredPrompt: null,
@@ -445,8 +446,9 @@ function renderDetail(y,m,d){
   const di=dayIndex(y,m,d), t=tideInfo(di), w=weatherOf(y,m,d,S.model), gs=goScore(w);
   const dt=new Date(y,m,d);
   const boats=boatsForSp(S.species);
+  const shown = S.hideFull ? boats.filter(b=>{ const o=seatsOf(b,y,m,d); return o!==null && o>0; }) : boats;
   let list="";
-  for(const b of boats){
+  for(const b of shown){
     const open=seatsOf(b,y,m,d), noData=open===null, soldout=open===0, urgent=open>0&&open<=2;
     const ranges=S.subs[b.id]||[]; const on=ranges.length>0; const editing=S.editBoat===b.id;
     list+=`<div class="card" style="padding:12px;margin-top:8px;${soldout?"opacity:.62":""}">
@@ -507,8 +509,11 @@ function renderDetail(y,m,d){
         ${tideRow}${curRow}
       </div>`;
     })()}
-    <div style="font-size:13px;font-weight:800;margin:16px 2px 8px">이 날 배 ${boats.length}척</div>
-    ${list}
+    <div class="row" style="justify-content:space-between;align-items:center;margin:16px 2px 8px">
+      <span style="font-size:13px;font-weight:800">이 날 배 ${shown.length}척${S.hideFull?` <span style="font-size:11px;color:${C.inkSoft};font-weight:600">(빈자리만)</span>`:""}</span>
+      <button data-action="togglefull" style="border:1px solid ${S.hideFull?C.beacon:C.line};background:${S.hideFull?C.beaconSoft:"#fff"};color:${S.hideFull?C.beacon:C.inkSoft};border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer">${S.hideFull?"☑":"☐"} 마감 제외</button>
+    </div>
+    ${shown.length?list:`<div class="card" style="padding:20px;text-align:center;color:${C.inkSoft};font-size:12.5px">이 날 빈자리 있는 배가 없어요. <button data-action="togglefull" style="border:none;background:none;color:${C.tide};font-weight:700;cursor:pointer;padding:0">전체 보기</button></div>`}
   </div>`;
 }
 function metric(ic,v,l,hot){ return `<div class="metric"><div style="font-size:15px">${ic}</div><div class="v" style="color:${hot?C.urgent:C.ink}">${v}</div><div class="l">${l}</div></div>`; }
@@ -680,6 +685,7 @@ document.addEventListener("click",(e)=>{
   else if(a==="extradel"){ const i=parseInt(v,10); const nm=S.extra[i]?.name||""; S.extra.splice(i,1); LS.set("extra",S.extra); render(); toast(`${nm} 삭제됨`); }
   else if(a==="boatdel"){ if(!S.hidden.includes(v)){ S.hidden.push(v); LS.set("hidden",S.hidden); } const nm=allBoatsRaw().find(x=>x.id===v)?.name||"배"; render(); toast(`${nm} 숨김 (선사추가 탭에서 복원)`); }
   else if(a==="boatshow"){ S.hidden=S.hidden.filter(x=>x!==v); LS.set("hidden",S.hidden); render(); toast("배를 다시 표시해요"); }
+  else if(a==="togglefull"){ S.hideFull=!S.hideFull; LS.set("hideFull",S.hideFull); render(); }
   else if(a==="tg"){ toast("알림봇 저장소 README의 텔레그램 설정을 따라주세요"); }
   else if(a==="share"){ submitUrl(S.urlDraft, (S.result&&S.result.ok)?S.result.name:""); }
   else if(a==="install"){ doInstall(); }
