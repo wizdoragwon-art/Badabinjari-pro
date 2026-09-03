@@ -14,12 +14,12 @@ const C = { ink:"#0e2a30", inkSoft:"#4a636a", tide:"#2b8896", tideSoft:"#d3e9ea"
 const DEFAULT_DATA = {
   updated: null,
   spots: [
-    { name:"삼길포 씨유만석낚시", port:"충남 서산 삼길포", boats:[
+    { name:"삼길포 씨유만석낚시", port:"충남 서산 삼길포", lat:36.99, lon:126.35, boats:[
       { id:"cu-manseok", name:"만석호", sp:["쭈꾸미","갑오징어"], dep:"일출", fee:null, cap:20, minGo:10, url:"http://www.mscufishing.com/index.php?mid=bk" },
       { id:"cu-hunter", name:"헌터호", sp:["갑오징어"], dep:"일출", fee:null, cap:15, minGo:8, url:"http://www.mscufishing.com/index.php?mid=bk" },
       { id:"cu-gold", name:"골드피싱호", sp:["백조기","갑오징어"], dep:"일출", fee:null, cap:15, minGo:8, url:"http://www.mscufishing.com/index.php?mid=bk" },
     ]},
-    { name:"오천항 대박호", port:"보령 오천항", boats:[
+    { name:"오천항 대박호", port:"보령 오천항", lat:36.31, lon:126.50, boats:[
       { id:"oc-daebak", name:"대박호", sp:["쭈꾸미","갑오징어"], dep:"06:30", fee:6.5, cap:20, minGo:10, url:"" },
     ]},
   ],
@@ -66,7 +66,9 @@ const S = {
   data: DEFAULT_DATA,
   result: null, analyzing: false, urlDraft: "",
   deferredPrompt: null,
-  weather: {},        // 시트/Open-Meteo에서 온 실측 날씨 (date → {temp,wind,wave,rain})
+  weather: {},        // (구시트 폴백) date → {temp,wind,wave,rain}
+  wx: {},             // 실날씨 캐시: "lat,lon" → { date: {temp,wind,wave,rain, am, pm} }
+  wxLoading: {},
   submissions: [],    // 지인이 공유한 URL 목록
 };
 
@@ -114,12 +116,60 @@ function seatsOf(boat, y, m, d){
 }
 function tideInfo(di){ const mul=((di%15)+15)%15+1; const spring=Math.abs(Math.sin((mul/15)*Math.PI)); const amp=130+spring*190;
   const label = (mul>=7&&mul<=9)?`${mul}물·사리`:(mul<=2||mul>=14)?`${mul}물·조금`:`${mul}물`; return {mul,amp,label}; }
+// ── 실날씨(Open-Meteo, 항구별 직접 호출) ──
+function curCoords(){
+  let sp=null;
+  if(S.port && S.port!=="전체") sp=allSpots().find(s=>s.port===S.port && s.lat!=null && s.lon!=null);
+  if(!sp) sp=allSpots().find(s=>s.lat!=null && s.lon!=null);
+  return sp?{lat:Number(sp.lat),lon:Number(sp.lon)}:null;
+}
+function curKey(){ const c=curCoords(); return c?`${c.lat.toFixed(3)},${c.lon.toFixed(3)}`:null; }
+function curWeather(){ const k=curKey(); return (k&&S.wx[k])||S.weather||{}; }
+
+async function ensureWeather(){
+  const c=curCoords(); if(!c) return;
+  const k=`${c.lat.toFixed(3)},${c.lon.toFixed(3)}`;
+  if(S.wx[k]||S.wxLoading[k]) return;
+  S.wxLoading[k]=true;
+  try{
+    const days=14, tz="Asia%2FSeoul";
+    const f=`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&hourly=temperature_2m,wind_speed_10m,precipitation_probability&wind_speed_unit=ms&timezone=${tz}&forecast_days=${days}`;
+    const m=`https://marine-api.open-meteo.com/v1/marine?latitude=${c.lat}&longitude=${c.lon}&hourly=wave_height&timezone=${tz}&forecast_days=${days}`;
+    const [fr,mr]=await Promise.all([fetch(f), fetch(m).catch(()=>null)]);
+    const fj=await fr.json(); let mj=null; try{ mj=mr?await mr.json():null; }catch{}
+    S.wx[k]=parseOpenMeteo(fj,mj);
+    LS.set("wxCache", S.wx);   // 오프라인 폴백용
+    render();
+  }catch{/* 오프라인: 데모/캐시 사용 */}
+  finally{ S.wxLoading[k]=false; }
+}
+function parseOpenMeteo(fj,mj){
+  const H=(fj&&fj.hourly)||{}; const times=H.time||[];
+  const T=H.temperature_2m||[], W=H.wind_speed_10m||[], R=H.precipitation_probability||[];
+  const waveByT={};
+  if(mj&&mj.hourly&&mj.hourly.time){ mj.hourly.time.forEach((t,i)=>{ waveByT[t]=mj.hourly.wave_height[i]; }); }
+  const byDate={};
+  times.forEach((t,i)=>{ const date=t.slice(0,10), hr=+t.slice(11,13);
+    const rec=byDate[date]||(byDate[date]={all:[],am:[],pm:[]});
+    const p={temp:T[i],wind:W[i],rain:R[i]||0,wave:waveByT[t]!=null?waveByT[t]:null};
+    rec.all.push(p); if(hr>=6&&hr<12) rec.am.push(p); if(hr>=12&&hr<18) rec.pm.push(p);
+  });
+  const agg=(arr)=>{ if(!arr||!arr.length) return null;
+    const avg=a=>a.reduce((x,y)=>x+y,0)/a.length, mx=a=>Math.max(...a);
+    const waves=arr.map(p=>p.wave).filter(v=>v!=null);
+    return { temp:Math.round(avg(arr.map(p=>p.temp))), wind:Math.round(mx(arr.map(p=>p.wind))),
+      rain:Math.round(mx(arr.map(p=>p.rain))), wave:waves.length?+mx(waves).toFixed(1):null }; };
+  const out={};
+  Object.keys(byDate).forEach(date=>{ const r=byDate[date]; out[date]=Object.assign(agg(r.all)||{},{am:agg(r.am),pm:agg(r.pm)}); });
+  return out;
+}
+
 function weatherOf(y, m, d, model){
   const di=dayIndex(y,m,d);
   const b=rnd(di+11,5), b2=rnd(di+7,9); const sh=model==="ecmwf"?-0.12:model==="kma"?0.1:0;
-  const SEA_TEMP=[2,4,9,15,20,24,27,28,24,18,11,4]; // 서해 월평균 근사(데모용)
+  const SEA_TEMP=[2,4,9,15,20,24,27,28,24,18,11,4]; // 서해 월평균 근사(데모 폴백용)
   const mock={ wave:+Math.max(0.2,0.4+b*1.7+sh*0.6).toFixed(1), wind:Math.round(Math.max(1,3+b2*8+sh*4)), temp:Math.round(SEA_TEMP[m]+(b-0.5)*6), rain:Math.round((b2*70)%100) };
-  const real=S.weather && S.weather[ymd(y,m,d)];
+  const real=curWeather()[ymd(y,m,d)];
   if(real){ return {
     temp: real.temp!=null?real.temp:mock.temp,
     wind: real.wind!=null?real.wind:mock.wind,
@@ -130,11 +180,11 @@ function weatherOf(y, m, d, model){
 }
 // 날씨 상태 → 아이콘 (파고·강수 기준)
 function skyIcon(w){ if((w.rain||0)>=60||(w.wave||0)>1.8) return "🌧️"; if((w.rain||0)>=30||(w.wave||0)>1.2) return "⛅"; return "☀️"; }
-// 오전/오후 날씨 (실측 am/pm 있으면 사용, 없으면 데모로 오후를 조금 흐리게)
+// 오전/오후 날씨 (실측 am/pm 있으면 사용, 없으면 데모)
 function weatherAMPM(y,m,d,model){
-  const base=weatherOf(y,m,d,model);
-  const real=S.weather && S.weather[ymd(y,m,d)];
+  const real=curWeather()[ymd(y,m,d)];
   if(real && real.am && real.pm) return { am:skyIcon(real.am), pm:skyIcon(real.pm), _real:true };
+  const base=weatherOf(y,m,d,model);
   const s=rnd(dayIndex(y,m,d)+3,2);
   const am={ rain:Math.round((base.rain||0)*0.65), wave:+((base.wave||0.5)*0.9).toFixed(1) };
   const pm={ rain:Math.min(100,Math.round((base.rain||0)*1.15+s*18)), wave:+((base.wave||0.5)*1.1).toFixed(1) };
@@ -335,7 +385,7 @@ function renderDetail(y,m,d){
         <div style="font-size:12px;font-weight:700;color:${C.inkSoft}">기상 예보</div>
         <div class="row" style="gap:4px">${MODELS.map(md=>`<button class="modelbtn ${S.model===md.id?"on":""}" data-action="model" data-v="${md.id}">${md.label}</button>`).join("")}</div>
       </div>
-      <div style="font-size:10px;color:${C.inkSoft};margin-bottom:10px">${w._real?"소스: 실데이터 · Open-Meteo(시트 연동)":"소스: "+MODELS.find(x=>x.id===S.model).sub+" · 데모값"}</div>
+      <div style="font-size:10px;color:${C.inkSoft};margin-bottom:10px">${w._real?"소스: 실측 · Open-Meteo(항구별·오전/오후)":"소스: 데모값 (실측 로딩 중이거나 예보 범위 밖)"}</div>
       <div class="cal" style="grid-template-columns:repeat(4,1fr)">
         ${metric("🌡️",w.temp+"°","기온")}${metric("🌊",w.wave+"m","파고",w.wave>1.5)}${metric("💨",w.wind,"풍속 m/s",w.wind>10)}${metric("💧",w.rain+"%","강수")}
       </div>
@@ -487,7 +537,7 @@ document.addEventListener("click",(e)=>{
   else if(a==="spcancel"){ S.addingSp=false; S.spDraft=""; render(); }
   else if(a==="spdel"){ removeSpecies(v); }
   else if(a==="month"){ S.monthOff+=parseInt(v,10); S.sel=null; render(); }
-  else if(a==="port"){ S.port=v; S.sel=null; S.addingPort=false; render(); }
+  else if(a==="port"){ S.port=v; S.sel=null; S.addingPort=false; render(); ensureWeather(); }
   else if(a==="portadd"){ S.addingPort=!S.addingPort; S.portDraft=""; render(); if(S.addingPort){ const el=document.getElementById("portIn"); if(el) el.focus(); } }
   else if(a==="portadd2"){ addPort(); }
   else if(a==="portcancel"){ S.addingPort=false; S.portDraft=""; render(); }
@@ -578,7 +628,9 @@ async function doInstall(){
 
 // ── 데이터 로드 + 부팅 ──
 async function boot(){
+  S.wx = LS.get("wxCache", {}) || {};   // 오프라인 폴백(마지막 실날씨)
   render();
+  ensureWeather();                       // 기본 항구 실날씨 로드
   // 1) 빈자리·출조점: data.json(텔레그램 봇이 갱신) 우선
   try{
     const r = await fetch("data.json", { cache:"no-cache" });
@@ -588,12 +640,11 @@ async function boot(){
       if(d && d.submissions) S.submissions = d.submissions;
     }
   }catch{ /* 오프라인: 캐시 사용 */ }
-  // 2) 구글 시트(Apps Script): 날씨·공유목록 보강, 출조점 없으면 시트 것으로
+  // 2) 구글 시트(Apps Script): 공유목록·구독 보강, 출조점 없으면 시트 것으로
   if(API_URL){
     try{
       const r = await fetch(API_URL + "?action=data", { cache:"no-cache" });
       if(r.ok){ const d = await r.json();
-        if(d.weather && Object.keys(d.weather).length) S.weather = d.weather;
         if(d.submissions && d.submissions.length) S.submissions = d.submissions;
         if(!(S.data.spots && S.data.spots.length) && d.spots && d.spots.length) S.data = d;
         if(Array.isArray(d.subs)){ const m={}; d.subs.forEach(s=>{ if(s.boatId) m[s.boatId]=s.ranges||[]; }); S.subs=m; LS.set("subsMap",m); }
@@ -601,6 +652,7 @@ async function boot(){
     }catch{}
   }
   render();
+  ensureWeather();   // 데이터 로드 후 좌표 확정되면 다시 시도
 }
 
 // 공유된 URL을 시트에 등록 (GET 방식이 Apps Script에서 가장 안정적)
