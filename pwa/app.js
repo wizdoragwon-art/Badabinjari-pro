@@ -174,7 +174,16 @@ function removePort(name){
   render(); toast(`${name} 삭제됨`);
 }
 // 그날 물높이 비율(0~1): 물때가 클수록(사리) 높게, 조금일수록 낮게
+// 물높이 비율: 실제 조석(조차)이 있으면 그걸로, 없으면 물때 근사
 function tideFrac(di){ const mul=((di%15)+15)%15+1; return Math.round(Math.abs(Math.sin((mul/15)*Math.PI))*100)/100; }
+function tideOf(sp,y,m,d){ return sp&&sp.ocean&&sp.ocean.tide&&sp.ocean.tide[ymd(y,m,d)]; }
+function tideFillReal(sp,y,m,d){
+  const oc=sp&&sp.ocean&&sp.ocean.tide; if(!oc) return null;
+  const t=oc[ymd(y,m,d)]; if(!t) return null;
+  let mn=1e9,mx=-1; for(const k in oc){ const r=oc[k].range; if(r<mn)mn=r; if(r>mx)mx=r; }
+  if(mx<=mn) return 0.6;
+  return Math.max(0.06, Math.min(1, (t.range-mn)/(mx-mn)));
+}
 
 function dayIndex(y,m,d){ return Math.round((Date.UTC(y,m,d)-Date.UTC(2024,0,1))/86400000); }
 function ymd(y,m,d){ return `${y}-${pad2(m+1)}-${pad2(d)}`; }
@@ -200,6 +209,14 @@ function curCoords(){
 }
 function curKey(){ const c=curCoords(); return c?`${c.lat.toFixed(3)},${c.lon.toFixed(3)}`:null; }
 function curWeather(){ const k=curKey(); return (k&&S.wx[k])||S.weather||{}; }
+// 현재 항구의 출조점(조류·수온 데이터 소스)
+function curSpot(){
+  if(S.port && S.port!=="전체"){ const s=allSpots().find(x=>x.port===S.port); if(s) return s; }
+  return allSpots().find(x=>x.lat!=null) || allSpots()[0] || null;
+}
+const DIR16=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const DIR16KO=["북","북북동","북동","동북동","동","동남동","남동","남남동","남","남남서","남서","서남서","서","서북서","북서","북북서"];
+function dirText(d){ if(d==null) return ""; if(typeof d==="string") return d; const i=Math.round(((d%360)/22.5))%16; return DIR16KO[i]; }
 
 async function ensureWeather(){
   const c=curCoords(); if(!c) return;
@@ -368,7 +385,7 @@ function renderCalendar(){
     let sum=0, hasData=false;
     if(!past) for(const b of boatsForSp(S.species)){ const s=seatsOf(b,y,m,d); if(s!==null){ hasData=true; sum+=s; } }
     const t=tideInfo(di), on=S.sel===d, ap=weatherAMPM(y,m,d,S.model);
-    const fill = portSel ? `<div class="cellfill" style="height:${Math.round(tideFrac(di)*100)}%"></div>` : "";
+    const fill = portSel ? `<div class="cellfill" style="height:${Math.round((tideFillReal(curSpot(),y,m,d) ?? tideFrac(di))*100)}%"></div>` : "";
     cells+=`<button class="cell ${on?"on":""}" data-action="day" data-v="${d}" ${past?"disabled":""}>
       ${fill}
       <div class="cellin">
@@ -479,6 +496,17 @@ function renderDetail(y,m,d){
       </div>
       <div style="margin-top:10px;background:${"#eef2f1"};border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;color:${gs.c}">⚓ ${gs.t}</div>
     </div>
+    ${(()=>{ const sp=curSpot(); const oc=sp&&sp.ocean; if(!oc) return "";
+      const td=oc.tide&&oc.tide[ymd(y,m,d)]; const cur=oc.current&&oc.current[ymd(y,m,d)];
+      if(!td&&!cur) return "";
+      const tideRow = td?`<div style="display:flex;flex-wrap:wrap;gap:6px">${td.events.map(e=>`<span style="font-size:11.5px;font-weight:700;color:${e.hl==="만조"?C.tide:C.beacon};background:${e.hl==="만조"?C.tideSoft:"#f7e5d1"};border-radius:6px;padding:3px 8px">${e.hl==="만조"?"▲":"▼"} ${e.t} <span style="opacity:.65;font-weight:400">${e.lv}cm</span></span>`).join("")}</div>
+        <div style="font-size:10.5px;color:${C.inkSoft};margin-top:6px">조차 ${td.range}cm · 고 ${td.hi} / 저 ${td.lo}</div>`:"";
+      const curRow = cur?`<div class="row" style="gap:8px;margin-top:${td?"8px":"0"};font-size:12px;color:${C.inkSoft}"><b style="color:${C.tide}">조류</b> 최강 ${cur.speed}㎨ ${cur.dir?"· "+esc(cur.dir):""}</div>`:"";
+      return `<div class="card" style="padding:12px;margin-top:10px">
+        <div style="font-size:12px;font-weight:700;color:${C.inkSoft};margin-bottom:8px">🌊 물때(만조·간조) · ${esc(sp.port||sp.name)} · KHOA</div>
+        ${tideRow}${curRow}
+      </div>`;
+    })()}
     <div style="font-size:13px;font-weight:800;margin:16px 2px 8px">이 날 배 ${boats.length}척</div>
     ${list}
   </div>`;
