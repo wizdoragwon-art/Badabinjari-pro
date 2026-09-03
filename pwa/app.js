@@ -608,4 +608,9 @@ async function submitUrl(url, name){
 boot();
 
 // ── 서비스워커 등록 ──
-if("serviceWorker" in navigator){ window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); }); }
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); });
+  // 새 서비스워커가 활성화되면 한 번 자동 새로고침(업데이트 즉시 반영)
+  let _reloaded=false;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{ if(_reloaded) return; _reloaded=true; location.reload(); });
+}
