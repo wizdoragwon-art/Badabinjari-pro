@@ -11,14 +11,28 @@ const UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Geck
 
 export async function fetchAvailability(spot) {
   if (MOCK) return mockSlots(spot);
-  const res = await fetch(spot.reserveUrl, { headers: { "User-Agent": UA, "Accept-Language": "ko" } });
-  console.log(`[${spot.name}] HTTP ${res.status}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status} — ${spot.reserveUrl}`);
-  const html = await res.text();
-  console.log(`[${spot.name}] HTML ${html.length}자`);
-  const slots = parseReservation(html, (spot.boats || []).map((b) => b.name), spot.name);
-  console.log(`[${spot.name}] 슬롯 ${slots.length}건`);
-  return slots.map((s) => ({ ...s, url: spot.reserveUrl }));
+  const names = (spot.boats || []).map((b) => b.name);
+  const days = spot.days || 28;          // 커버할 기간(일)
+  const p2 = (n) => String(n).padStart(2, "0");
+  const merged = new Map();               // "ymd|boat" → slot (중복 제거)
+  const today = new Date();
+
+  // 한 페이지가 약 8일치만 보여주므로, 7일 간격 앵커로 여러 페이지를 긁는다
+  for (let off = 0; off < days; off += 7) {
+    const d = new Date(today); d.setDate(today.getDate() + off);
+    const url = `${spot.reserveUrl}&year=${d.getFullYear()}&month=${p2(d.getMonth() + 1)}&day=${p2(d.getDate())}`;
+    let html;
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Language": "ko" } });
+      if (!res.ok) { console.error(`[${spot.name}] HTTP ${res.status} @${p2(d.getMonth()+1)}/${p2(d.getDate())}`); continue; }
+      html = await res.text();
+    } catch (e) { console.error(`[${spot.name}] fetch 실패: ${e.message}`); continue; }
+    const slots = parseReservation(html, names, `${spot.name} ${p2(d.getMonth()+1)}/${p2(d.getDate())}`);
+    for (const s of slots) merged.set(`${s.ymd}|${s.boat}`, { ...s, url: spot.reserveUrl });
+  }
+  const out = [...merged.values()];
+  console.log(`[${spot.name}] 총 슬롯 ${out.length}건 (${days}일 커버)`);
+  return out;
 }
 
 export function parseReservation(html, knownBoats = [], label = "") {
@@ -46,10 +60,13 @@ export function parseReservation(html, knownBoats = [], label = "") {
     matchedBoats += boats.length;
     for (const b of boats) {
       const seats = seatSet(b.body);
-      const soldout = /예약완료|예약마감|\[\[SOLDOUT\]\]|\[독배\]/.test(b.body);
+      const rm = b.body.match(/\[\[REMAIN:(\d+)\]\]/);       // 남은자리 이미지 숫자
+      const remain = rm ? parseInt(rm[1], 10) : null;
+      const dokbae = /\[독배\]/.test(b.body);
+      const soldout = /예약완료|예약마감|\[\[SOLDOUT\]\]/.test(b.body) || dokbae;
       const { species, dep } = noticeInfo(b.body);
       capSeen[b.name] = Math.max(capSeen[b.name] || 0, seats.size ? Math.max(...seats) : 0);
-      raw.push({ ...heads[i], boat: b.name, seats, soldout, species, dep });
+      raw.push({ ...heads[i], boat: b.name, seats, remain, dokbae, soldout, species, dep });
     }
   }
   if (label) console.log(`  [${label}] 배매칭 ${matchedBoats}회, raw ${raw.length}건`);
@@ -57,9 +74,9 @@ export function parseReservation(html, knownBoats = [], label = "") {
   const p2 = (n) => String(n).padStart(2, "0");
   return raw.map((r) => {
     const cfgCap = (knownBoats.__cap && knownBoats.__cap[r.boat]) || 0;
-    const cap = Math.max(capSeen[r.boat] || 0, cfgCap, r.seats.size);
-    const taken = r.seats.size;
-    const open = r.soldout ? 0 : Math.max(0, cap - taken);
+    const cap = Math.max(capSeen[r.boat] || 0, cfgCap, r.seats.size, (r.remain || 0) + r.seats.size);
+    // 잔여석: 이미지 숫자가 있으면 그대로, 없으면 좌석표(정원-예약) 폴백
+    const open = r.dokbae ? 0 : (r.remain != null ? r.remain : (r.soldout ? 0 : Math.max(0, cap - r.seats.size)));
     return { boat: r.boat, species: r.species, date: `${r.mo}/${r.d}`,
       ymd: `${r.y}-${p2(r.mo)}-${p2(r.d)}`, dow: r.dow, dep: r.dep, open, cap, mul: r.mul };
   });
@@ -67,8 +84,8 @@ export function parseReservation(html, knownBoats = [], label = "") {
 
 function stripToText(html) {
   return String(html)
-    .replace(/<img[^>]*r_x_0\.gif[^>]*>/gi, " [[SOLDOUT]] ")
-    .replace(/r_x_0\.gif/gi, " [[SOLDOUT]] ")
+    .replace(/<img[^>]*?r_x_(\d+)\.gif[^>]*?>/gi, " [[REMAIN:$1]] ")
+    .replace(/r_x_(\d+)\.gif/gi, " [[REMAIN:$1]] ")
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
