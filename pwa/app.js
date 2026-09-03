@@ -62,6 +62,8 @@ const S = {
   addingSp: false, spDraft: "",
   ports: LS.get("ports", null),      // 사용자 편집 항구목록(null=자동)
   addingPort: false, portDraft: "",
+  portCoords: LS.get("portCoords", {}),   // 사용자 추가 항구 좌표: {name:{lat,lon}}
+  portResults: [], portSearching: false,
   hidden: LS.get("hidden", []),      // 숨긴 배 id 목록
   data: DEFAULT_DATA,
   result: null, analyzing: false, urlDraft: "",
@@ -93,12 +95,39 @@ function addPort(){
   const base=activePorts();
   if(n==="전체"||base.includes(n)){ toast("이미 있는 항구예요"); S.addingPort=false; S.portDraft=""; render(); return; }
   S.ports=[...base,n]; LS.set("ports",S.ports);
-  S.port=n; S.addingPort=false; S.portDraft=""; S.sel=null; render();
+  S.port=n; S.addingPort=false; S.portDraft=""; S.portResults=[]; S.sel=null; render();
   toast(`📍 ${n} 추가됨`);
+}
+// 지명 검색(Open-Meteo Geocoding, 키 불필요)
+async function searchPorts(){
+  const q=(S.portDraft||"").trim();
+  if(!q){ toast("검색어를 입력하세요"); return; }
+  S.portSearching=true; S.portResults=[]; render();
+  try{
+    const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=ko&format=json`);
+    const j=await r.json();
+    S.portResults=(j.results||[]).map(x=>({
+      name:x.name, lat:x.latitude, lon:x.longitude,
+      admin:[x.admin1,x.admin2].filter(Boolean).join(" "), cc:x.country_code||""
+    }));
+    if(!S.portResults.length) toast("결과 없음 — 인근 지명으로 검색하거나 이름만 추가하세요");
+  }catch{ toast("검색 실패 — 네트워크 확인"); }
+  finally{ S.portSearching=false; render(); }
+}
+function pickPort(i){
+  const r=S.portResults[i]; if(!r) return;
+  const label=r.admin ? `${r.name}(${r.admin.split(" ")[0]})` : r.name;
+  const base=activePorts();
+  if(!base.includes(label)){ S.ports=[...base,label]; LS.set("ports",S.ports); }
+  S.portCoords[label]={lat:r.lat,lon:r.lon}; LS.set("portCoords",S.portCoords);
+  S.port=label; S.addingPort=false; S.portDraft=""; S.portResults=[]; S.sel=null; render();
+  ensureWeather();
+  toast(`📍 ${label} 추가됨 (좌표 자동)`);
 }
 function removePort(name){
   const base=activePorts();
   S.ports=base.filter(x=>x!==name); LS.set("ports",S.ports);
+  if(S.portCoords&&S.portCoords[name]){ delete S.portCoords[name]; LS.set("portCoords",S.portCoords); }
   if(S.port===name) S.port="전체";
   render(); toast(`${name} 삭제됨`);
 }
@@ -118,10 +147,14 @@ function tideInfo(di){ const mul=((di%15)+15)%15+1; const spring=Math.abs(Math.s
   const label = (mul>=7&&mul<=9)?`${mul}물·사리`:(mul<=2||mul>=14)?`${mul}물·조금`:`${mul}물`; return {mul,amp,label}; }
 // ── 실날씨(Open-Meteo, 항구별 직접 호출) ──
 function curCoords(){
-  let sp=null;
-  if(S.port && S.port!=="전체") sp=allSpots().find(s=>s.port===S.port && s.lat!=null && s.lon!=null);
-  if(!sp) sp=allSpots().find(s=>s.lat!=null && s.lon!=null);
-  return sp?{lat:Number(sp.lat),lon:Number(sp.lon)}:null;
+  if(S.port && S.port!=="전체"){
+    const sp=allSpots().find(s=>s.port===S.port && s.lat!=null && s.lon!=null);
+    if(sp) return {lat:Number(sp.lat),lon:Number(sp.lon)};
+    const pc=S.portCoords&&S.portCoords[S.port];
+    if(pc) return {lat:Number(pc.lat),lon:Number(pc.lon)};
+  }
+  const first=allSpots().find(s=>s.lat!=null && s.lon!=null);
+  return first?{lat:Number(first.lat),lon:Number(first.lon)}:null;
 }
 function curKey(){ const c=curCoords(); return c?`${c.lat.toFixed(3)},${c.lon.toFixed(3)}`:null; }
 function curWeather(){ const k=curKey(); return (k&&S.wx[k])||S.weather||{}; }
@@ -309,10 +342,20 @@ function renderCalendar(){
   const ml=`${y}.${pad2(m+1)}`;
   let detail = S.sel ? renderDetail(y,m,S.sel) : `<div style="margin-top:20px;text-align:center;color:${C.inkSoft};font-size:13px;padding:24px 0">⚓<br>날짜를 눌러 물때·날씨·빈자리 배를 확인하세요.</div>`;
   const ports=activePorts();
-  const addRow = S.addingPort ? `<div class="row gap" style="margin-bottom:8px">
-      <input id="portIn" value="${esc(S.portDraft)}" placeholder="항구 이름 (예: 격포항)" maxlength="20" style="flex:1;border:1px solid ${C.line};border-radius:8px;padding:8px;font-size:12.5px;outline:none" />
-      <button data-action="portadd2" style="background:${C.tide};color:#fff;border:none;border-radius:8px;padding:0 12px;font-size:12.5px;font-weight:800;cursor:pointer">추가</button>
-      <button data-action="portcancel" style="background:#fff;color:${C.inkSoft};border:1px solid ${C.line};border-radius:8px;padding:0 10px;font-size:12.5px;cursor:pointer">취소</button>
+  const results = S.portResults.length ? `<div class="card" style="margin-bottom:8px;padding:4px">
+      ${S.portResults.map((r,i)=>`<div data-action="portpick" data-v="${i}" style="padding:9px 10px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px">
+        <span>📍</span><span style="font-size:13px;font-weight:700">${esc(r.name)}</span>
+        <span style="font-size:11px;color:${C.inkSoft};flex:1">${esc(r.admin)}${r.cc&&r.cc!=="KR"?" · "+esc(r.cc):""}</span>
+        <span style="font-size:11px;color:${C.tide};font-weight:700">선택</span></div>`).join("")}
+    </div>` : "";
+  const addRow = S.addingPort ? `<div style="margin-bottom:8px">
+      <div class="row gap">
+        <input id="portIn" value="${esc(S.portDraft)}" placeholder="지명 검색 (예: 격포, 오천, 남당)" maxlength="20" style="flex:1;border:1px solid ${C.line};border-radius:8px;padding:8px;font-size:12.5px;outline:none" />
+        <button data-action="portsearch" style="background:${C.tide};color:#fff;border:none;border-radius:8px;padding:0 12px;font-size:12.5px;font-weight:800;cursor:pointer">${S.portSearching?"검색중…":"🔍 검색"}</button>
+        <button data-action="portcancel" style="background:#fff;color:${C.inkSoft};border:1px solid ${C.line};border-radius:8px;padding:0 10px;font-size:12.5px;cursor:pointer">취소</button>
+      </div>
+      ${results}
+      <div style="font-size:10.5px;color:${C.inkSoft};margin-top:2px">검색해서 고르면 좌표가 자동 입력돼 그 지역 실날씨가 나와요. 안 잡히면 <button data-action="portadd2" style="border:none;background:none;color:${C.tide};font-weight:700;cursor:pointer;padding:0;font-size:10.5px">이름만 추가</button></div>
     </div>` : "";
   const portRow = `<div class="ports">
       <button class="port ${S.port==="전체"?"on":""}" data-action="port" data-v="전체">전체 항구</button>
@@ -538,8 +581,10 @@ document.addEventListener("click",(e)=>{
   else if(a==="spdel"){ removeSpecies(v); }
   else if(a==="month"){ S.monthOff+=parseInt(v,10); S.sel=null; render(); }
   else if(a==="port"){ S.port=v; S.sel=null; S.addingPort=false; render(); ensureWeather(); }
-  else if(a==="portadd"){ S.addingPort=!S.addingPort; S.portDraft=""; render(); if(S.addingPort){ const el=document.getElementById("portIn"); if(el) el.focus(); } }
+  else if(a==="portadd"){ S.addingPort=!S.addingPort; S.portDraft=""; S.portResults=[]; render(); if(S.addingPort){ const el=document.getElementById("portIn"); if(el) el.focus(); } }
   else if(a==="portadd2"){ addPort(); }
+  else if(a==="portsearch"){ searchPorts(); }
+  else if(a==="portpick"){ pickPort(parseInt(v,10)); }
   else if(a==="portcancel"){ S.addingPort=false; S.portDraft=""; render(); }
   else if(a==="portdel"){ removePort(v); }
   else if(a==="day"){ S.sel=parseInt(v,10); render(); }
@@ -571,7 +616,7 @@ document.addEventListener("click",(e)=>{
 // 입력값 유지
 document.addEventListener("input",(e)=>{ if(e.target.id==="urlIn") S.urlDraft=e.target.value; if(e.target.id==="spIn") S.spDraft=e.target.value; if(e.target.id==="portIn") S.portDraft=e.target.value; });
 // 어종·항구 입력에서 엔터로 추가
-document.addEventListener("keydown",(e)=>{ if(e.target.id==="spIn" && e.key==="Enter"){ e.preventDefault(); addSpecies(); } if(e.target.id==="portIn" && e.key==="Enter"){ e.preventDefault(); addPort(); } });
+document.addEventListener("keydown",(e)=>{ if(e.target.id==="spIn" && e.key==="Enter"){ e.preventDefault(); addSpecies(); } if(e.target.id==="portIn" && e.key==="Enter"){ e.preventDefault(); searchPorts(); } });
 
 function removeSpecies(name){
   S.speciesList = S.speciesList.filter(x=>x!==name);
