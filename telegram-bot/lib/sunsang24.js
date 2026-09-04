@@ -68,7 +68,8 @@ export function parseSchedule(html, year) {
   const heads = [];
   let m;
   while ((m = dateRe.exec(text)) !== null) heads.push({ idx: m.index, mo: +m[1], d: +m[2], dow: m[3] });
-  if (!heads.length) return [];
+  console.log(`  [sunsang24] 날짜 ${heads.length}개 발견`);
+  if (!heads.length) { console.log(`  [sunsang24] 앞부분: ${text.slice(0, 160)}`); return []; }
 
   const p2 = (n) => String(n).padStart(2, "0");
   const out = [];

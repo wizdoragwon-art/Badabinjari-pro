@@ -22,17 +22,40 @@ export async function fetchAvailability(spot) {
     const d = new Date(today); d.setDate(today.getDate() + off);
     const url = `${spot.reserveUrl}&year=${d.getFullYear()}&month=${p2(d.getMonth() + 1)}&day=${p2(d.getDate())}`;
     let html;
-    try {
-      const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Language": "ko" } });
-      if (!res.ok) { console.error(`[${spot.name}] HTTP ${res.status} @${p2(d.getMonth()+1)}/${p2(d.getDate())}`); continue; }
-      html = await res.text();
-    } catch (e) { console.error(`[${spot.name}] fetch 실패: ${e.message}`); continue; }
+    try { html = await fetchText(url, spot.name); }
+    catch (e) {
+      const cause = e && e.cause ? ` (${e.cause.code || e.cause.message || ""})` : "";
+      console.error(`[${spot.name}] fetch 실패 @${p2(d.getMonth()+1)}/${p2(d.getDate())}: ${e.message}${cause}`);
+      continue;
+    }
     const slots = parseReservation(html, names, `${spot.name} ${p2(d.getMonth()+1)}/${p2(d.getDate())}`);
     for (const s of slots) merged.set(`${s.ymd}|${s.boat}`, { ...s, url: spot.reserveUrl });
   }
   const out = [...merged.values()];
   console.log(`[${spot.name}] 총 슬롯 ${out.length}건 (${days}일 커버)`);
   return out;
+}
+
+// 재시도(3회) + 20초 타임아웃 + 상세 원인
+async function fetchText(url, label) {
+  let lastErr;
+  for (let i = 0; i < 3; i++) {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, "Accept-Language": "ko", "Accept": "text/html,application/xhtml+xml,*/*" },
+        signal: ctrl.signal, redirect: "follow",
+      });
+      clearTimeout(to);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.text();
+    } catch (e) {
+      clearTimeout(to); lastErr = e;
+      if (i < 2) await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  throw lastErr;
 }
 
 export function parseReservation(html, knownBoats = [], label = "") {
