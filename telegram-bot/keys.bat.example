@@ -1,0 +1,8 @@
+@echo off
+rem ===== 이 파일을 복사해서 "keys.bat" 로 저장한 뒤, 아래 값을 채우세요 =====
+rem keys.bat 는 .gitignore 에 있어 깃허브에 올라가지 않습니다(키 노출 방지).
+
+set TELEGRAM_BOT_TOKEN=여기에_봇토큰_붙여넣기
+set TELEGRAM_CHAT_ID=여기에_챗아이디_붙여넣기
+set KHOA_KEY=여기에_해양조사원_인증키_붙여넣기
+set SHEET_URL=여기에_AppsScript_웹앱_exec_URL_붙여넣기
