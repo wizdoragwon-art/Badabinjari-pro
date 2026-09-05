@@ -10,9 +10,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import { sendMessage, formatAlert } from "./lib/telegram.js";
 import { fetchAvailability as thefishing } from "./lib/thefishing.js";
 import { fetchAvailability as sunsang24 } from "./lib/sunsang24.js";
+import { fetchAvailability as thefishing2 } from "./lib/thefishing2.js";
 import { fetchOcean } from "./lib/khoa.js";
 
-const ADAPTERS = { thefishing, sunsang24 };
+const ADAPTERS = { thefishing, thefishing2, sunsang24 };
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9가-힣]+/g, "-").replace(/^-|-$/g, "");
 const keyOf = (spot, boat, ymd) => `${spot.uid || slug(spot.name)}|${boat}|${ymd}`;

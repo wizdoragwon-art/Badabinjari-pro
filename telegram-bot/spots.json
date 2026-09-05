@@ -118,6 +118,223 @@
         "currentObs": "",
         "tideObs": "DT_0025"
       }
+    },
+    {
+      "name": "조커호",
+      "platform": "thefishing",
+      "reserveUrl": "http://www.seasidefishing.kr/index.php?mid=bk",
+      "days": 60,
+      "boats": [
+        {
+          "name": "조커호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "삼성호",
+      "platform": "thefishing",
+      "reserveUrl": "http://xn--cg4bkiz07c.com/m/index.php?mid=bk",
+      "days": 60,
+      "boats": [
+        {
+          "name": "삼성호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "헤라호",
+      "platform": "thefishing",
+      "reserveUrl": "https://www.ssfish.kr/index.php?mid=bk",
+      "days": 60,
+      "boats": [
+        {
+          "name": "헤라호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "야야호",
+      "platform": "thefishing",
+      "reserveUrl": "http://yayaho.kr/index.php?mid=bk",
+      "days": 60,
+      "boats": [
+        {
+          "name": "야야호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "서해피싱호",
+      "platform": "thefishing",
+      "reserveUrl": "https://xn--2i4bo7ap3xqzcc7bmivb.com/index.php?mid=bk",
+      "days": 60,
+      "boats": [
+        {
+          "name": "서해피싱호",
+          "dep": "",
+          "cap": 14
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "팀프렌드호",
+      "platform": "thefishing",
+      "reserveUrl": "http://friendho.com/index.php?mid=bk",
+      "days": 60,
+      "boats": [
+        {
+          "name": "팀프렌드호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "예린호",
+      "platform": "thefishing2",
+      "reserveUrl": "https://thefishing.kr/reservation/list.php?uid=3515",
+      "boats": [
+        {
+          "name": "예린호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "오디세이호",
+      "platform": "thefishing2",
+      "reserveUrl": "https://thefishing.kr/reservation/list.php?uid=788",
+      "boats": [
+        {
+          "name": "오디세이호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "양파호",
+      "platform": "thefishing2",
+      "reserveUrl": "https://thefishing.kr/reservation/list.php?uid=3950",
+      "boats": [
+        {
+          "name": "양파호",
+          "dep": "",
+          "cap": 20
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "오아시스호",
+      "platform": "thefishing2",
+      "reserveUrl": "https://thefishing.kr/reservation/list.php?uid=2987",
+      "boats": [
+        {
+          "name": "오아시스호",
+          "dep": "",
+          "cap": 17
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "빅보스호",
+      "platform": "sunsang24",
+      "reserveUrl": "https://bigboss24.sunsang24.com/ship/schedule_fleet",
+      "days": 60,
+      "boats": [
+        {
+          "name": "빅보스호",
+          "dep": "",
+          "cap": 17
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "뉴시아호",
+      "platform": "sunsang24",
+      "reserveUrl": "https://siaho.sunsang24.com/ship/schedule_fleet",
+      "days": 60,
+      "boats": [
+        {
+          "name": "뉴시아호",
+          "dep": "",
+          "cap": 16
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
+    },
+    {
+      "name": "태풍호",
+      "platform": "sunsang24",
+      "reserveUrl": "https://janggofish.sunsang24.com/ship/schedule_fleet",
+      "days": 60,
+      "boats": [
+        {
+          "name": "태풍호",
+          "dep": "",
+          "cap": 21
+        }
+      ],
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ]
     }
   ]
 }
