@@ -175,7 +175,48 @@ function removePort(name){
 }
 // 그날 물높이 비율(0~1): 물때가 클수록(사리) 높게, 조금일수록 낮게
 // 물높이 비율: 실제 조석(조차)이 있으면 그걸로, 없으면 물때 근사
-function tideFrac(di){ const mul=((di%15)+15)%15+1; return Math.round(Math.abs(Math.sin((mul/15)*Math.PI))*100)/100; }
+// ── 음력 변환 (천문 계산, 오프라인) + 7물때식(서해) ──
+const _d2r = Math.PI / 180;
+function gregToJD(y, m, d){ if(m<=2){y-=1;m+=12;} const A=Math.floor(y/100),B=2-A+Math.floor(A/4);
+  return Math.floor(365.25*(y+4716))+Math.floor(30.6001*(m+1))+d+B-1524.5; }
+function newMoonJDE(k){
+  const T=k/1236.85;
+  let JDE=2451550.09766+29.530588861*k+0.00015437*T*T-0.000000150*T*T*T+0.00000000073*T*T*T*T;
+  const E=1-0.002516*T-0.0000074*T*T;
+  const M=2.5534+29.10535670*k-0.0000014*T*T-0.00000011*T*T*T;
+  const Mp=201.5643+385.81693528*k+0.0107582*T*T+0.00001238*T*T*T-0.000000058*T*T*T*T;
+  const F=160.7108+390.67050284*k-0.0016118*T*T-0.00000227*T*T*T+0.000000011*T*T*T*T;
+  const Om=124.7746-1.56375588*k+0.0020672*T*T+0.00000215*T*T*T;
+  JDE+= -0.40720*Math.sin(Mp*_d2r)+0.17241*E*Math.sin(M*_d2r)+0.01608*Math.sin(2*Mp*_d2r)
+    +0.01039*Math.sin(2*F*_d2r)+0.00739*E*Math.sin((Mp-M)*_d2r)-0.00514*E*Math.sin((Mp+M)*_d2r)
+    +0.00208*E*E*Math.sin(2*M*_d2r)-0.00111*Math.sin((Mp-2*F)*_d2r)-0.00057*Math.sin((Mp+2*F)*_d2r)
+    +0.00056*E*Math.sin((2*Mp+M)*_d2r)-0.00042*Math.sin(3*Mp*_d2r)+0.00042*E*Math.sin((M+2*F)*_d2r)
+    +0.00038*E*Math.sin((M-2*F)*_d2r)-0.00024*E*Math.sin((2*Mp-M)*_d2r)-0.00017*Math.sin(Om*_d2r);
+  return JDE;
+}
+const _kstDay = (jde) => Math.floor(jde + 9/24 + 0.5);
+function lunarDay(y,m,d){
+  const target=Math.floor(gregToJD(y,m,d)+0.5+9/24);
+  const kApprox=(y+(m-0.5)/12-2000)*12.3685;
+  let best=null;
+  for(let k=Math.floor(kApprox)-2;k<=Math.floor(kApprox)+2;k++){
+    const nm=_kstDay(newMoonJDE(k));
+    if(nm<=target && (best===null || nm>best)) best=nm;
+  }
+  return target-best+1;   // 1~30
+}
+// 7물때식(서해): 음력일 → 물때 라벨
+const MUL7=["7물","8물","9물","10물","11물","12물","13물","조금","무시","1물","2물","3물","4물","5물","6물"];
+function tide7(y,m,d){
+  const ld=lunarDay(y,m,d);
+  const label=MUL7[((ld-1)%15+15)%15];
+  const mm=label.match(/(\d+)물/); const mulNum=mm?+mm[1]:0;
+  const spring=Math.abs(Math.cos(((ld-2)/14.7653)*Math.PI)); // 사리(음력2·17)↑ 조금(음력9·24)↓
+  const amp=130+spring*190;
+  return { ld, label, mulNum, spring, amp };
+}
+// 물높이 비율(KHOA 없을 때): 사리↑ 조금↓
+function tideFrac(y,m,d){ return tide7(y,m,d).spring; }
 function tideOf(sp,y,m,d){ return sp&&sp.ocean&&sp.ocean.tide&&sp.ocean.tide[ymd(y,m,d)]; }
 function tideFillReal(sp,y,m,d){
   const oc=sp&&sp.ocean&&sp.ocean.tide; if(!oc) return null;
@@ -194,8 +235,6 @@ function seatsOf(boat, y, m, d){
   const v = av ? av[ymd(y,m,d)] : undefined;
   return (typeof v === "number") ? v : null;
 }
-function tideInfo(di){ const mul=((di%15)+15)%15+1; const spring=Math.abs(Math.sin((mul/15)*Math.PI)); const amp=130+spring*190;
-  const label = (mul>=7&&mul<=9)?`${mul}물·사리`:(mul<=2||mul>=14)?`${mul}물·조금`:`${mul}물`; return {mul,amp,label}; }
 // ── 실날씨(Open-Meteo, 항구별 직접 호출) ──
 function curCoords(){
   if(S.port && S.port!=="전체"){
@@ -384,8 +423,8 @@ function renderCalendar(){
     const dt=new Date(y,m,d), past=dt<todayMid, di=dayIndex(y,m,d);
     let sum=0, hasData=false;
     if(!past) for(const b of boatsForSp(S.species)){ const s=seatsOf(b,y,m,d); if(s!==null){ hasData=true; sum+=s; } }
-    const t=tideInfo(di), on=S.sel===d, ap=weatherAMPM(y,m,d,S.model);
-    const fill = portSel ? `<div class="cellfill" style="height:${Math.round((tideFillReal(curSpot(),y,m,d) ?? tideFrac(di))*100)}%"></div>` : "";
+    const t=tide7(y,m,d), on=S.sel===d, ap=weatherAMPM(y,m,d,S.model);
+    const fill = portSel ? `<div class="cellfill" style="height:${Math.round((tideFillReal(curSpot(),y,m,d) ?? tideFrac(y,m,d))*100)}%"></div>` : "";
     cells+=`<button class="cell ${on?"on":""}" data-action="day" data-v="${d}" ${past?"disabled":""}>
       ${fill}
       <div class="cellin">
@@ -393,7 +432,7 @@ function renderCalendar(){
         ${past ? `<div class="none">지남</div>`
           : (!hasData ? (S.loading ? `<div class="none" style="font-size:8.5px;color:${C.tide}">불러오는중</div>` : `<div class="none" style="font-size:9px">정보없음</div>`)
             : (sum>0 ? `<div class="open">빈 ${sum}</div>` : `<div class="none">마감</div>`))}
-        <div class="mul">${t.mul}물</div>
+        <div class="mul">${t.label}</div>
         <div class="wv" style="justify-content:center;gap:3px;font-size:9px"><span title="오전">${ap.am}</span><span title="오후">${ap.pm}</span></div>
       </div>
     </button>`;
@@ -443,7 +482,7 @@ function renderCalendar(){
 }
 
 function renderDetail(y,m,d){
-  const di=dayIndex(y,m,d), t=tideInfo(di), w=weatherOf(y,m,d,S.model), gs=goScore(w);
+  const t=tide7(y,m,d), w=weatherOf(y,m,d,S.model), gs=goScore(w);
   const dt=new Date(y,m,d);
   const boats=boatsForSp(S.species);
   const shown = S.hideFull ? boats.filter(b=>{ const o=seatsOf(b,y,m,d); return o!==null && o>0; }) : boats;
