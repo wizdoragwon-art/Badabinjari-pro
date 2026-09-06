@@ -83,13 +83,17 @@ export function parseReservation(html, knownBoats = [], label = "") {
     matchedBoats += boats.length;
     for (const b of boats) {
       const seats = seatSet(b.body);
+      const booked = bookedCount(b.body);   // 좌석번호 없이 이름(N) 인원만 있는 선단 대응
       const rm = b.body.match(/\[\[REMAIN:(\d+)\]\]/);       // 남은자리 이미지 숫자
       const remain = rm ? parseInt(rm[1], 10) : null;
+      // 남은자리 "N명" 텍스트(야야호 선단 등) — 좌석표 "(N명/..)"은 제외
+      let remainTxt = null, rtm; const reRt = /(\d+)\s*명(?!\s*\/)/g;
+      while ((rtm = reRt.exec(b.body)) !== null) remainTxt = parseInt(rtm[1], 10);  // 마지막(남은자리 칸)
       const dokbae = /\[독배\]/.test(b.body);
       const soldout = /예약완료|예약마감|\[\[SOLDOUT\]\]/.test(b.body) || dokbae;
       const { species, dep } = noticeInfo(b.body);
       capSeen[b.name] = Math.max(capSeen[b.name] || 0, seats.size ? Math.max(...seats) : 0);
-      raw.push({ ...heads[i], boat: b.name, seats, remain, dokbae, soldout, species, dep });
+      raw.push({ ...heads[i], boat: b.name, seats, booked, remain, remainTxt, dokbae, soldout, species, dep });
     }
   }
   if (label) console.log(`  [${label}] 배매칭 ${matchedBoats}회, raw ${raw.length}건`);
@@ -97,9 +101,13 @@ export function parseReservation(html, knownBoats = [], label = "") {
   const p2 = (n) => String(n).padStart(2, "0");
   return raw.map((r) => {
     const cfgCap = (knownBoats.__cap && knownBoats.__cap[r.boat]) || 0;
-    const cap = Math.max(capSeen[r.boat] || 0, cfgCap, r.seats.size, (r.remain || 0) + r.seats.size);
-    // 잔여석: 이미지 숫자가 있으면 그대로, 없으면 좌석표(정원-예약) 폴백
-    const open = r.dokbae ? 0 : (r.remain != null ? r.remain : (r.soldout ? 0 : Math.max(0, cap - r.seats.size)));
+    const taken = r.seats.size > 0 ? r.seats.size : (r.booked || 0);  // 좌석번호 우선, 없으면 인원수
+    const cap = Math.max(capSeen[r.boat] || 0, cfgCap, taken, (r.remain || 0) + taken, (r.remainTxt || 0) + taken);
+    // 잔여석: 이미지숫자 > 남은자리텍스트 > 마감 > (정원-예약)
+    const open = r.dokbae ? 0
+      : (r.remain != null ? r.remain
+        : (r.remainTxt != null ? r.remainTxt
+          : (r.soldout ? 0 : Math.max(0, cap - taken))));
     return { boat: r.boat, species: r.species, date: `${r.mo}/${r.d}`,
       ymd: `${r.y}-${p2(r.mo)}-${p2(r.d)}`, dow: r.dow, dep: r.dep, open, cap, mul: r.mul };
   });
@@ -149,6 +157,14 @@ function seatSet(body) {
     m[1].split(",").forEach((x) => { const n = parseInt(x.trim(), 10); if (n) set.add(n); });
   }
   return set;
+}
+
+// "이름(N)" 인원수 합 (좌석번호 없는 선단). "(N명/1,2)" 좌석표 형식은 매칭 안 됨.
+function bookedCount(body) {
+  let sum = 0, m;
+  const re = /\((\d+)\)/g;
+  while ((m = re.exec(body)) !== null) sum += parseInt(m[1], 10);
+  return sum;
 }
 
 function noticeInfo(body) {
