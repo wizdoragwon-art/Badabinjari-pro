@@ -28,13 +28,24 @@ export async function fetchAvailability(spot) {
 
   const days = Math.max(1, spot.days || 60);
   const today = new Date(Date.now() + 9 * 3600 * 1000);
-  const capByBoat = {};
-  (spot.boats || []).forEach((b) => { if (b.cap) capByBoat[b.name] = b.cap; });
-  const boatName = (spot.boats && spot.boats[0] && spot.boats[0].name) || spot.name;
+  const boats = spot.boats || [];
+  const capByBoat = {}; boats.forEach((b) => { if (b.cap) capByBoat[b.name] = b.cap; });
+  // 다중 배(선단): boats[].schedNo + schedDate 기준으로 ship_schedule_no 를 날짜증가 추적해 매칭
+  const anchored = boats.filter((b) => b.schedNo && b.schedDate);
+  const dDiff = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+  const boatByNo = (no, ymd) => {
+    let best = null, bd = Infinity;
+    for (const b of anchored) {
+      const expected = b.schedNo + dDiff(b.schedDate, ymd);
+      const diff = Math.abs(Number(no) - expected);
+      if (diff < bd) { bd = diff; best = b; }
+    }
+    return (best && bd <= 150) ? best.name : null;   // 150 이내면 그 배(뉴항구호↔뉴항구1호 간격 336의 절반)
+  };
+  const boatName = (boats[0] && boats[0].name) || spot.name;
 
-  // 날짜 범위를 최대 30일씩 끊어 호출
   const out = [];
-  const capSeen = { max: 0 };
+  const capSeen = {};   // 배별 관찰 최대 좌석
   for (let off = 0; off < days; off += 30) {
     const s = new Date(today); s.setDate(today.getDate() + off);
     const e = new Date(today); e.setDate(today.getDate() + Math.min(off + 29, days - 1));
@@ -50,21 +61,23 @@ export async function fetchAvailability(spot) {
       const ymd = String(row.sdate || "").slice(0, 10);
       if (!ymd) continue;
       const taken = seatCount(row.reservation_end) + seatCount(row.reservation_new_end);
-      if (taken > capSeen.max) capSeen.max = taken;
-      out.push({ _ymd: ymd, _taken: taken, _boat: boatName });
+      // 배 결정: 선단이면 schedule_no 추적으로, 아니면 대표 배
+      const bn = anchored.length ? boatByNo(row.ship_schedule_no, ymd) : boatName;
+      if (!bn) continue;   // 어느 배에도 안 맞으면 건너뜀
+      capSeen[bn] = Math.max(capSeen[bn] || 0, taken);
+      out.push({ _ymd: ymd, _taken: taken, _boat: bn });
     }
   }
 
-  // 정원: 설정값 우선, 없으면 관찰된 최대 예약좌석수(만석일 때 정원에 근접) 사용
-  const cfgCap = capByBoat[boatName] || 0;
   return out.map((r) => {
-    const cap = Math.max(cfgCap, capSeen.max, r._taken);
+    const cap = Math.max(capByBoat[r._boat] || 0, capSeen[r._boat] || 0, r._taken);
     const open = Math.max(0, cap - r._taken);
     const [y, mo, d] = r._ymd.split("-").map(Number);
+    const bcfg = boats.find((b) => b.name === r._boat) || {};
     return {
       boat: r._boat, species: spot.species || ["기타"],
       date: `${mo}/${d}`, ymd: r._ymd, dow: DOW[new Date(y, mo - 1, d).getDay()],
-      dep: (spot.boats && spot.boats[0] && spot.boats[0].dep) || "", open, cap, mul: "-", url: base,
+      dep: bcfg.dep || "", open, cap, mul: "-", url: base,
     };
   });
 }
