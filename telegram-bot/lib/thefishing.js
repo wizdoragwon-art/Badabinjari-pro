@@ -127,13 +127,20 @@ function stripToText(html) {
 // 배 이름 경계: 설정 배 이름(괄호 suffix는 떼고도 매칭)으로 위치를 잡는다.
 function splitBoats(seg, knownBoats) {
   const names = (knownBoats && knownBoats.length) ? knownBoats : [];
+  // 핵심이름 = 첫 공백/괄호/숫자 앞까지 (예: "메이저호 010-.. (이선장)" → "메이저호")
+  const core = (full) => String(full).replace(/[\s(].*$/, "").trim() || String(full);
+  const list = names.map((full) => ({ full, core: core(full) }))
+    .sort((a, b) => b.core.length - a.core.length);   // 긴 이름 먼저(팀몬스터호 > 몬스터호)
+  const claimed = [];
+  const overlaps = (a, b) => claimed.some((c) => a < c.e && b > c.s);
   const marks = [];
-  for (const full of names) {
-    const base = String(full).replace(/\s*\([^)]*\)\s*$/, "").trim(); // "골드피싱(20)"→"골드피싱"
-    for (const needle of [full, base]) {
-      if (!needle) continue;
-      let from = 0, p;
-      while ((p = seg.indexOf(needle, from)) !== -1) { marks.push({ i: p, name: full, len: needle.length }); from = p + needle.length; }
+  for (const { full, core: c } of list) {
+    if (!c) continue;
+    let from = 0, p;
+    while ((p = seg.indexOf(c, from)) !== -1) {
+      const e = p + c.length;
+      if (!overlaps(p, e)) { claimed.push({ s: p, e }); marks.push({ i: p, name: full, len: c.length }); }
+      from = e;
     }
   }
   marks.sort((a, b) => a.i - b.i);
@@ -142,7 +149,7 @@ function splitBoats(seg, knownBoats) {
     const start = marks[k].i + marks[k].len;
     const end = k + 1 < marks.length ? marks[k + 1].i : seg.length;
     const body = seg.slice(start, end);
-    if (/입금|출항|공지|독배|예약완료|예약마감|\[\[SOLDOUT\]\]|명\s*\//.test(body)) out.push({ name: marks[k].name, body });
+    if (/입금|출항|공지|독배|예약완료|예약마감|\[\[SOLDOUT\]\]|\[\[REMAIN|명\s*\/|(\d+)\s*명/.test(body)) out.push({ name: marks[k].name, body });
   }
   const seen = new Set();
   return out.filter((b) => (seen.has(b.name) ? false : (seen.add(b.name), true)));
