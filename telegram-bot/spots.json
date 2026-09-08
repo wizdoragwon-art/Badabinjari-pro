@@ -458,6 +458,40 @@
           "cap": 21
         }
       ]
+    },
+    {
+      "name": "뉴항구호",
+      "port": "",
+      "platform": "sunsang24",
+      "reserveUrl": "https://daebak.sunsang24.com/ship/schedule_fleet",
+      "days": 60,
+      "species": [
+        "쭈꾸미",
+        "갑오징어"
+      ],
+      "boats": [
+        {
+          "name": "뉴항구호",
+          "cap": 20,
+          "dep": "",
+          "schedNo": 1760168,
+          "schedDate": "2026-09-08"
+        },
+        {
+          "name": "뉴항구1호",
+          "cap": 21,
+          "dep": "",
+          "schedNo": 1760504,
+          "schedDate": "2026-09-08"
+        },
+        {
+          "name": "레전드호",
+          "cap": 11,
+          "dep": "",
+          "schedNo": 1979981,
+          "schedDate": "2026-09-08"
+        }
+      ]
     }
   ]
 }
