@@ -11,7 +11,6 @@ import { sendMessage, formatAlert } from "./lib/telegram.js";
 import { fetchAvailability as thefishing } from "./lib/thefishing.js";
 import { fetchAvailability as sunsang24 } from "./lib/sunsang24.js";
 import { fetchAvailability as thefishing2 } from "./lib/thefishing2.js";
-import { fetchOcean } from "./lib/khoa.js";
 
 const ADAPTERS = { thefishing, thefishing2, sunsang24 };
 
@@ -102,14 +101,8 @@ async function main() {
       url: spot.reserveUrl,
     }));
     if (boatsForPwa.length) {
-      const entry = { name: spot.name, port: spot.port || "", lat: spot.lat ?? null, lon: spot.lon ?? null, boats: boatsForPwa };
-      if (process.env.KHOA_KEY) {
-        try { entry.ocean = await fetchOcean(spot, process.env.KHOA_KEY);
-          const cd = Object.keys(entry.ocean.current || {}).length;
-          console.log(`[${spot.name}] KHOA 조류 ${cd}일 · 수온 ${entry.ocean.temp ? entry.ocean.temp.value + "℃" : "없음"}`);
-        } catch (e) { console.error(`[${spot.name}] KHOA 실패: ${e.message}`); }
-      }
-      pwaSpots.push(entry);
+      // 조석·조류는 이제 앱이 Apps Script 프록시로 직접 가져옵니다(봇에서 제외).
+      pwaSpots.push({ name: spot.name, port: spot.port || "", lat: spot.lat ?? null, lon: spot.lon ?? null, khoaTideObs: (spot.khoa && spot.khoa.tideObs) || "", boats: boatsForPwa });
     }
   }
 
