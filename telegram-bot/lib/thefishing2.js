@@ -38,11 +38,10 @@ export function parseList(html, opt = {}) {
   const cap = opt.cap || (capM ? +capM[1] : 0);
   // 어종
   const species = opt.species && opt.species.length ? opt.species : fishOf(text);
-  // 기준 연·월 (현재 KST)
+  // 기준 연·월: list.php 기본 페이지는 '현재 달'을 보여주므로 현재 KST 연월 사용
+  // (페이지의 연월 텍스트는 공지/선택기 등과 섞여 부정확 → 신뢰하지 않음)
   const now = new Date(Date.now() + 9 * 3600 * 1000);
-  let year = now.getUTCFullYear(), month = now.getUTCMonth() + 1;
-  const ym = text.match(/(\d{4})\s*년?\s*(\d{1,2})\s*월/); // 페이지에 연월이 있으면 사용
-  if (ym) { year = +ym[1]; month = +ym[2]; }
+  const year = now.getUTCFullYear(), month = now.getUTCMonth() + 1;
 
   // 리스트 행: "10 목요일 5물 남은인원 3명" / "5 토요일 무시 예약완료"
   const re = /(\d{1,2})\s*([일월화수목금토])요일\s*([0-9]{0,2}[가-힣]{1,4})\s*(예약완료|예약마감|남은인원\s*(\d+)\s*명)/g;

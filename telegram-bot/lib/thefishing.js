@@ -17,8 +17,8 @@ export async function fetchAvailability(spot) {
   const merged = new Map();               // "ymd|boat" → slot (중복 제거)
   const today = new Date();
 
-  // 한 페이지가 약 8일치만 보여주므로, 7일 간격 앵커로 여러 페이지를 긁는다
-  for (let off = 0; off < days; off += 7) {
+  // 한 페이지가 4~8일치만 보여줘서(선사마다 다름), 4일 간격 앵커로 촘촘히 긁어 빈날 방지
+  for (let off = 0; off < days; off += 4) {
     const d = new Date(today); d.setDate(today.getDate() + off);
     const url = `${spot.reserveUrl}&year=${d.getFullYear()}&month=${p2(d.getMonth() + 1)}&day=${p2(d.getDate())}`;
     let html;
