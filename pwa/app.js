@@ -4,7 +4,7 @@
 // ── 백엔드(Google Apps Script) 주소 ──
 // 배포한 웹앱 /exec URL을 넣으면 구글 시트에서 데이터를 읽고, 공유한 URL이 시트에 쌓입니다.
 // 비워두면 로컬 data.json 을 사용합니다.
-const API_URL = "https://script.google.com/macros/s/AKfycbwNycJ8YFtaxd9rYknRg7qXZAYwgbB4l3lNOyxwgs4uiBOMcf0qrnnRvlHa-Cns6a2m/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbwrlsfEyLdGWYYemJS7FJbiJo0adqkeLpLT1gCt-Z5V1bDQjspUkhS31UFyIu9_0OxH/exec";
 
 // ── 팔레트 (CSS 변수와 동일) ──
 const C = { ink:"#0e2a30", inkSoft:"#4a636a", tide:"#2b8896", tideSoft:"#d3e9ea",
@@ -84,9 +84,8 @@ function searchHarbors(q){
 }
 
 const MODELS = [
-  { id:"openmeteo", label:"Open-Meteo", sub:"멀티모델(ECMWF 포함)" },
-  { id:"ecmwf", label:"ECMWF", sub:"중기 전지구" },
-  { id:"kma", label:"기상청", sub:"LDAPS 국지 1.5km" },
+  { id:"openmeteo", label:"Open-Meteo", sub:"멀티모델 실측" },
+  { id:"kma", label:"기상청", sub:"단기예보(연동 예정)" },
 ];
 
 // ── 영속 상태 ──
@@ -114,6 +113,10 @@ const S = {
   weather: {},        // (구시트 폴백) date → {temp,wind,wave,rain}
   wx: {},             // 실날씨 캐시: "lat,lon" → { date: {temp,wind,wave,rain, am, pm} }
   wxLoading: {},
+  kmaByKey: {},       // 기상청(프록시): "lat,lon" → { date: {am:{icon,temp,rain,wind}, pm} }
+  kmaLoading: {},
+  tideByObs: LS.get("tideCache", {}),  // 조석(프록시): 관측소코드 → { date: {events,hi,lo,range} }
+  tideLoading: {},
   submissions: [],    // 지인이 공유한 URL 목록
 };
 
@@ -215,14 +218,15 @@ function tide7(y,m,d){
   const amp=130+spring*190;
   return { ld, label, mulNum, spring, amp };
 }
-// 물높이 비율(KHOA 없을 때): 사리↑ 조금↓
+// 물높이 비율(조석 없을 때): 사리↑ 조금↓
 function tideFrac(y,m,d){ return tide7(y,m,d).spring; }
-function tideOf(sp,y,m,d){ return sp&&sp.ocean&&sp.ocean.tide&&sp.ocean.tide[ymd(y,m,d)]; }
+function spotTide(sp){ const obs=sp&&sp.khoaTideObs; return (obs&&S.tideByObs[obs])||null; }
+function tideOf(sp,y,m,d){ const t=spotTide(sp); return t&&t[ymd(y,m,d)]; }
 function tideFillReal(sp,y,m,d){
-  const oc=sp&&sp.ocean&&sp.ocean.tide; if(!oc) return null;
-  const t=oc[ymd(y,m,d)]; if(!t) return null;
+  const t=spotTide(sp); if(!t) return null;
+  const r=t[ymd(y,m,d)]; if(!r) return null;
   // 바다타임식 절대 기준: 그날 조차(cm)를 서해 대조차 고정 스케일로 (조금~130cm=12%, 사리~810cm=100%)
-  const base=Math.max(0,Math.min(1,(t.range-130)/(810-130)));
+  const base=Math.max(0,Math.min(1,(r.range-130)/(810-130)));
   return Math.max(0.05, Math.min(1, 0.12 + base*0.88));
 }
 
@@ -247,7 +251,38 @@ function curCoords(){
   return first?{lat:Number(first.lat),lon:Number(first.lon)}:null;
 }
 function curKey(){ const c=curCoords(); return c?`${c.lat.toFixed(3)},${c.lon.toFixed(3)}`:null; }
-function curWeather(){ const k=curKey(); return (k&&S.wx[k])||S.weather||{}; }
+function curWeather(){
+  const k=curKey();
+  if(S.model==="kma" && k && S.kmaByKey[k]) return S.kmaByKey[k];   // 기상청 선택 시
+  return (k&&S.wx[k])||S.weather||{};
+}
+// 기상청 단기예보(Apps Script 프록시) 로드 — 3일치, model=kma일 때
+async function ensureKma(){
+  if(S.model!=="kma" || !API_URL) return;
+  const c=curCoords(); if(!c) return;
+  const k=`${c.lat.toFixed(3)},${c.lon.toFixed(3)}`;
+  if(S.kmaByKey[k]||S.kmaLoading[k]) return;
+  S.kmaLoading[k]=true;
+  try{
+    const r=await fetch(`${API_URL}?action=kma&lat=${c.lat}&lon=${c.lon}`);
+    const j=await r.json();
+    if(j && j.ok && j.days){ S.kmaByKey[k]=j.days; render(); }
+  }catch{/* 실패 시 Open-Meteo 유지 */}
+  finally{ S.kmaLoading[k]=false; }
+}
+// 조석예보(Apps Script 프록시) 로드 — 현재 항구의 관측소
+async function ensureTide(){
+  if(!API_URL) return;
+  const sp=curSpot(); const obs=sp&&sp.khoaTideObs; if(!obs) return;
+  if(S.tideByObs[obs]||S.tideLoading[obs]) return;
+  S.tideLoading[obs]=true;
+  try{
+    const r=await fetch(`${API_URL}?action=tide&obs=${encodeURIComponent(obs)}&days=14`);
+    const j=await r.json();
+    if(j && j.ok && j.tide){ S.tideByObs[obs]=j.tide; LS.set("tideCache",S.tideByObs); render(); }
+  }catch{/* 오프라인: 캐시/음력근사 */}
+  finally{ S.tideLoading[obs]=false; }
+}
 // 현재 항구의 출조점(조류·수온 데이터 소스)
 function curSpot(){
   if(S.port && S.port!=="전체"){ const s=allSpots().find(x=>x.port===S.port); if(s) return s; }
@@ -297,21 +332,24 @@ function parseOpenMeteo(fj,mj){
 
 function weatherOf(y, m, d, model){
   const di=dayIndex(y,m,d);
-  const b=rnd(di+11,5), b2=rnd(di+7,9); const sh=model==="ecmwf"?-0.12:model==="kma"?0.1:0;
+  const b=rnd(di+11,5), b2=rnd(di+7,9);
   const SEA_TEMP=[2,4,9,15,20,24,27,28,24,18,11,4]; // 서해 월평균 근사(데모 폴백용)
-  const mock={ wave:+Math.max(0.2,0.4+b*1.7+sh*0.6).toFixed(1), wind:Math.round(Math.max(1,3+b2*8+sh*4)), temp:Math.round(SEA_TEMP[m]+(b-0.5)*6), rain:Math.round((b2*70)%100) };
+  const mock={ wave:+Math.max(0.2,0.4+b*1.7).toFixed(1), wind:Math.round(Math.max(1,3+b2*8)), temp:Math.round(SEA_TEMP[m]+(b-0.5)*6), rain:Math.round((b2*70)%100) };
   const real=curWeather()[ymd(y,m,d)];
-  if(real){ return {
-    temp: real.temp!=null?real.temp:mock.temp,
-    wind: real.wind!=null?real.wind:mock.wind,
-    wave: real.wave!=null?real.wave:mock.wave,
-    rain: real.rain!=null?real.rain:mock.rain,
-    _real:true }; }
+  if(real){
+    // 상단 값이 없으면(기상청은 am/pm만) 오후→오전 순으로 대체
+    const pick=(f)=> real[f]!=null?real[f] : (real.pm&&real.pm[f]!=null?real.pm[f] : (real.am&&real.am[f]!=null?real.am[f]:null));
+    return {
+      temp: pick('temp')!=null?pick('temp'):mock.temp,
+      wind: pick('wind')!=null?pick('wind'):mock.wind,
+      wave: real.wave!=null?real.wave:mock.wave,   // 기상청 단기예보엔 파고 없음 → 근사
+      rain: pick('rain')!=null?pick('rain'):mock.rain,
+      _real:true }; }
   return mock;
 }
 // 날씨 상태 → 아이콘 (파고·강수 기준)
-function skyIcon(w){ if((w.rain||0)>=60||(w.wave||0)>1.8) return "🌧️"; if((w.rain||0)>=30||(w.wave||0)>1.2) return "⛅"; return "☀️"; }
-// 오전/오후 날씨 (실측 am/pm 있으면 사용, 없으면 데모)
+function skyIcon(w){ if(!w) return "☀️"; if(w.icon) return w.icon; if((w.rain||0)>=60||(w.wave||0)>1.8) return "🌧️"; if((w.rain||0)>=30||(w.wave||0)>1.2) return "⛅"; return "☀️"; }
+// 오전/오후 날씨 (실측/기상청 am/pm 있으면 사용, 없으면 데모)
 function weatherAMPM(y,m,d,model){
   const real=curWeather()[ymd(y,m,d)];
   if(real && real.am && real.pm) return { am:skyIcon(real.am), pm:skyIcon(real.pm), _real:true };
@@ -537,15 +575,13 @@ function renderDetail(y,m,d){
       </div>
       <div style="margin-top:10px;background:${"#eef2f1"};border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;color:${gs.c}">⚓ ${gs.t}</div>
     </div>
-    ${(()=>{ const sp=curSpot(); const oc=sp&&sp.ocean; if(!oc) return "";
-      const td=oc.tide&&oc.tide[ymd(y,m,d)]; const cur=oc.current&&oc.current[ymd(y,m,d)];
-      if(!td&&!cur) return "";
-      const tideRow = td?`<div style="display:flex;flex-wrap:wrap;gap:6px">${td.events.map(e=>`<span style="font-size:11.5px;font-weight:700;color:${e.hl==="만조"?C.tide:C.beacon};background:${e.hl==="만조"?C.tideSoft:"#f7e5d1"};border-radius:6px;padding:3px 8px">${e.hl==="만조"?"▲":"▼"} ${e.t} <span style="opacity:.65;font-weight:400">${e.lv}cm</span></span>`).join("")}</div>
-        <div style="font-size:10.5px;color:${C.inkSoft};margin-top:6px">조차 ${td.range}cm · 고 ${td.hi} / 저 ${td.lo}</div>`:"";
-      const curRow = cur?`<div class="row" style="gap:8px;margin-top:${td?"8px":"0"};font-size:12px;color:${C.inkSoft}"><b style="color:${C.tide}">조류</b> 최강 ${cur.speed}㎨ ${cur.dir?"· "+esc(cur.dir):""}</div>`:"";
+    ${(()=>{ const sp=curSpot(); const td=tideOf(sp,y,m,d);
+      if(!td) return "";
+      const tideRow = `<div style="display:flex;flex-wrap:wrap;gap:6px">${td.events.map(e=>`<span style="font-size:11.5px;font-weight:700;color:${e.hl==="만조"?C.tide:C.beacon};background:${e.hl==="만조"?C.tideSoft:"#f7e5d1"};border-radius:6px;padding:3px 8px">${e.hl==="만조"?"▲":"▼"} ${e.t} <span style="opacity:.65;font-weight:400">${e.lv}cm</span></span>`).join("")}</div>
+        <div style="font-size:10.5px;color:${C.inkSoft};margin-top:6px">조차 ${td.range}cm · 고 ${td.hi} / 저 ${td.lo}</div>`;
       return `<div class="card" style="padding:12px;margin-top:10px">
         <div style="font-size:12px;font-weight:700;color:${C.inkSoft};margin-bottom:8px">🌊 물때(만조·간조) · ${esc(sp.port||sp.name)} · KHOA</div>
-        ${tideRow}${curRow}
+        ${tideRow}
       </div>`;
     })()}
     <div class="row" style="justify-content:space-between;align-items:center;margin:16px 2px 8px">
@@ -695,15 +731,15 @@ document.addEventListener("click",(e)=>{
   else if(a==="spcancel"){ S.addingSp=false; S.spDraft=""; render(); }
   else if(a==="spdel"){ removeSpecies(v); }
   else if(a==="month"){ S.monthOff+=parseInt(v,10); S.sel=null; render(); }
-  else if(a==="port"){ S.port=v; S.sel=null; S.addingPort=false; render(); ensureWeather(); }
+  else if(a==="port"){ S.port=v; S.sel=null; S.addingPort=false; render(); ensureWeather(); ensureKma(); ensureTide(); }
   else if(a==="portadd"){ S.addingPort=!S.addingPort; S.portDraft=""; S.portResults=[]; render(); if(S.addingPort){ const el=document.getElementById("portIn"); if(el) el.focus(); } }
   else if(a==="portadd2"){ addPort(); }
   else if(a==="portsearch"){ searchPorts(); }
   else if(a==="portpick"){ pickPort(parseInt(v,10)); }
   else if(a==="portcancel"){ S.addingPort=false; S.portDraft=""; render(); }
   else if(a==="portdel"){ removePort(v); }
-  else if(a==="day"){ S.sel=parseInt(v,10); render(); }
-  else if(a==="model"){ S.model=v; render(); }
+  else if(a==="day"){ S.sel=parseInt(v,10); render(); ensureTide(); }
+  else if(a==="model"){ S.model=v; render(); ensureKma(); }
   else if(a==="sub"){ S.editBoat=v; S.editRanges=(S.subs[v]||[]).slice(); S.editFrom=""; S.editTo=""; render(); }
   else if(a==="editcancel"){ S.editBoat=null; S.editRanges=[]; render(); }
   else if(a==="rangeadd"){
@@ -821,6 +857,7 @@ async function boot(){
   S.loading = false;
   render();
   ensureWeather();   // 데이터 로드 후 좌표 확정되면 다시 시도
+  ensureTide();      // 조석(프록시)
 }
 
 // 공유된 URL을 시트에 등록 (GET 방식이 Apps Script에서 가장 안정적)
