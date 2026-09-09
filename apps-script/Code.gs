@@ -14,6 +14,7 @@
 const CONFIG_DEFAULTS = {
   WEATHER_PROVIDER: 'open-meteo',   // 'open-meteo'(키 불필요, 파고 포함) 또는 'openweather'
   WEATHER_API_KEY: '',              // openweather 쓸 때만
+  DATA_GO_KR_KEY: '',               // 공공데이터포털 키 (기상청 단기예보 + KHOA 조석 공용, Encoding 키)
   LAT: '36.99',                     // 기본: 서산 삼길포 부근
   LON: '126.35',
   TZ: 'Asia/Seoul',
@@ -45,6 +46,11 @@ function setup() {
   if (cf.getLastRow() === 0) {
     cf.appendRow(['key', 'value']);
     Object.keys(CONFIG_DEFAULTS).forEach(k => cf.appendRow([k, CONFIG_DEFAULTS[k]]));
+  } else {
+    // 이미 Config가 있으면, 빠진 기본 키만 아래에 추가(기존 값은 보존)
+    const rows = cf.getDataRange().getValues();
+    const have = {}; for (let i = 1; i < rows.length; i++) if (rows[i][0]) have[String(rows[i][0]).trim()] = true;
+    Object.keys(CONFIG_DEFAULTS).forEach(k => { if (!have[k]) cf.appendRow([k, CONFIG_DEFAULTS[k]]); });
   }
   SpreadsheetApp.flush();
   return 'setup 완료';
@@ -62,6 +68,8 @@ function doGet(e) {
   if (action === 'submit') return json_(appendSubmission_(e.parameter)); // GET 방식 공유(폴백)
   if (action === 'subs') return json_({ ok: true, subs: readSubs_() });   // 봇이 읽는 구독 목록
   if (action === 'savesub') return json_(saveSub_(e.parameter));          // GET 방식 저장(폴백)
+  if (action === 'kma') return json_(kmaForecast_(e.parameter));          // 기상청 단기예보 프록시
+  if (action === 'tide') return json_(khoaTide_(e.parameter));            // KHOA 조석예보 프록시
   return json_(buildData_());
 }
 
@@ -256,3 +264,128 @@ function fetchOpenWeather_(cfg) {
 
 // ── 테스트용 ──────────────────────────────────────────
 function testBuild() { Logger.log(JSON.stringify(buildData_(), null, 2)); }
+
+// ══════════════════════════════════════════════════════
+//  공공데이터포털 프록시 (기상청 단기예보 + KHOA 조석)
+//  키는 Config 의 DATA_GO_KR_KEY (Encoding 키). 구글 서버가 대신 호출 → CORS·차단·키노출 해결.
+// ══════════════════════════════════════════════════════
+
+// ── 기상청 단기예보: ?action=kma&lat=..&lon=.. → {ok, days:{ 'YYYY-MM-DD': {am:{icon,temp,..}, pm:{...}, ...} }}
+function kmaForecast_(p) {
+  const cfg = getConfig_();
+  const key = cfg.DATA_GO_KR_KEY;
+  if (!key) return { ok: false, msg: 'Config 에 DATA_GO_KR_KEY 를 넣으세요.' };
+  const lat = parseFloat(p.lat || cfg.LAT), lon = parseFloat(p.lon || cfg.LON);
+  const g = latLonToGrid_(lat, lon);
+
+  // 발표시각: 단기예보는 02,05,08,11,14,17,20,23시 발표. 가장 최근 것 사용(KST -40분 여유)
+  const now = new Date(Date.now() + 9 * 3600e3 - 40 * 60e3);
+  const baseTimes = [23, 20, 17, 14, 11, 8, 5, 2];
+  let bd = new Date(now), bh = now.getUTCHours();
+  let baseTime = baseTimes.find(h => bh >= h);
+  if (baseTime == null) { bd = new Date(now.getTime() - 24 * 3600e3); baseTime = 23; }
+  const baseDate = `${bd.getUTCFullYear()}${z2_(bd.getUTCMonth() + 1)}${z2_(bd.getUTCDate())}`;
+  const baseTimeS = z2_(baseTime) + '00';
+
+  const url = 'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst'
+    + '?serviceKey=' + encodeURIComponent(key)
+    + '&pageNo=1&numOfRows=1000&dataType=JSON'
+    + '&base_date=' + baseDate + '&base_time=' + baseTimeS
+    + '&nx=' + g.nx + '&ny=' + g.ny;
+  let items;
+  try {
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const j = JSON.parse(res.getContentText());
+    const body = (j && j.response && j.response.body) || (j && j.body);
+    items = body && body.items && body.items.item;
+    if (!items) return { ok: false, msg: '기상청 응답 이상', raw: res.getContentText().slice(0, 200) };
+  } catch (e) { return { ok: false, msg: '기상청 호출 실패: ' + e.message }; }
+
+  // 카테고리: TMP(기온) POP(강수확률) SKY(하늘1맑음3구름많음4흐림) PTY(강수형태) WSD(풍속)
+  const byDate = {};
+  for (const it of items) {
+    const d = `${it.fcstDate.slice(0,4)}-${it.fcstDate.slice(4,6)}-${it.fcstDate.slice(6,8)}`;
+    const hr = parseInt(it.fcstTime.slice(0, 2), 10);
+    const slot = hr < 12 ? 'am' : 'pm';
+    const rec = byDate[d] || (byDate[d] = { am: {}, pm: {} });
+    const v = it.fcstValue;
+    if (it.category === 'TMP') rec[slot].temp = pickMid_(rec[slot].temp, +v, hr, slot);
+    else if (it.category === 'POP') rec[slot].rain = Math.max(rec[slot].rain || 0, +v);
+    else if (it.category === 'WSD') rec[slot].wind = Math.max(rec[slot].wind || 0, +v);
+    else if (it.category === 'SKY') rec[slot]._sky = Math.max(rec[slot]._sky || 0, +v);
+    else if (it.category === 'PTY') rec[slot]._pty = Math.max(rec[slot]._pty || 0, +v);
+  }
+  // 아이콘 결정
+  const days = {};
+  for (const d in byDate) {
+    const o = byDate[d]; const conv = (s) => ({
+      temp: s.temp != null ? Math.round(s.temp) : null,
+      rain: s.rain != null ? Math.round(s.rain) : null,
+      wind: s.wind != null ? Math.round(s.wind) : null,
+      icon: kmaIcon_(s._sky, s._pty, s.rain),
+    });
+    days[d] = { am: conv(o.am), pm: conv(o.pm) };
+  }
+  return { ok: true, base: baseDate + baseTimeS, nx: g.nx, ny: g.ny, days };
+}
+function pickMid_(cur, v) { return cur == null ? v : (cur + v) / 2; }
+function kmaIcon_(sky, pty, rain) {
+  if (pty && pty >= 1) return '🌧️';            // 비/눈
+  if (sky >= 4 || (rain || 0) >= 60) return '🌧️';
+  if (sky >= 3 || (rain || 0) >= 30) return '⛅';
+  return '☀️';
+}
+
+// ── KHOA 조석예보(고·저조): ?action=tide&obs=DT_0017&days=10
+function khoaTide_(p) {
+  const cfg = getConfig_();
+  const key = cfg.DATA_GO_KR_KEY;
+  if (!key) return { ok: false, msg: 'Config 에 DATA_GO_KR_KEY 를 넣으세요.' };
+  const obs = p.obs;
+  if (!obs) return { ok: false, msg: 'obs(관측소 코드) 필요' };
+  const nDays = Math.min(parseInt(p.days || '10', 10), 20);
+  const base = 'https://apis.data.go.kr/1192136/tideFcstHghLw/GetTideFcstHghLwApiService';
+  const tide = {};
+  for (let i = 0; i < nDays; i++) {
+    const dt = new Date(Date.now() + 9 * 3600e3 + i * 86400e3);
+    const ymd = `${dt.getUTCFullYear()}${z2_(dt.getUTCMonth() + 1)}${z2_(dt.getUTCDate())}`;
+    const url = base + '?serviceKey=' + encodeURIComponent(key)
+      + '&pageNo=1&numOfRows=100&type=json&obsCode=' + encodeURIComponent(obs) + '&reqDate=' + ymd;
+    try {
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      const j = JSON.parse(res.getContentText());
+      // 1192136 계열은 {header,body} 최상위, 표준은 {response:{header,body}} — 둘 다 대응
+      const body = (j && j.response && j.response.body) || (j && j.body);
+      let it = body && body.items && body.items.item;
+      if (!it) continue; if (!Array.isArray(it)) it = [it];
+      const ev = it.map(r => ({ t: String(r.predcDt || '').slice(11, 16), lv: Math.round(parseFloat(r.predcTdlvVl)) }))
+        .filter(x => x.t && !isNaN(x.lv));
+      if (!ev.length) continue;
+      const lvs = ev.map(x => x.lv), hi = Math.max(...lvs), lo = Math.min(...lvs), mid = (hi + lo) / 2;
+      const key2 = `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
+      tide[key2] = { events: ev.map(x => ({ t: x.t, lv: x.lv, hl: x.lv >= mid ? '만조' : '간조' })),
+                     hi, lo, range: hi - lo };
+    } catch (e) { /* 하루 실패는 건너뜀 */ }
+  }
+  return { ok: true, obs, tide };
+}
+function z2_(n) { return String(n).padStart(2, '0'); }
+
+// 위경도 → 기상청 격자(nx,ny) 변환 (기상청 공식 LCC DFS)
+function latLonToGrid_(lat, lon) {
+  const RE = 6371.00877, GRID = 5.0, SLAT1 = 30.0, SLAT2 = 60.0, OLON = 126.0, OLAT = 38.0, XO = 43, YO = 136;
+  const DEGRAD = Math.PI / 180.0;
+  const re = RE / GRID, slat1 = SLAT1 * DEGRAD, slat2 = SLAT2 * DEGRAD, olon = OLON * DEGRAD, olat = OLAT * DEGRAD;
+  let sn = Math.tan(Math.PI * 0.25 + slat2 * 0.5) / Math.tan(Math.PI * 0.25 + slat1 * 0.5);
+  sn = Math.log(Math.cos(slat1) / Math.cos(slat2)) / Math.log(sn);
+  let sf = Math.tan(Math.PI * 0.25 + slat1 * 0.5); sf = Math.pow(sf, sn) * Math.cos(slat1) / sn;
+  let ro = Math.tan(Math.PI * 0.25 + olat * 0.5); ro = re * sf / Math.pow(ro, sn);
+  let ra = Math.tan(Math.PI * 0.25 + lat * DEGRAD * 0.5); ra = re * sf / Math.pow(ra, sn);
+  let theta = lon * DEGRAD - olon;
+  if (theta > Math.PI) theta -= 2.0 * Math.PI;
+  if (theta < -Math.PI) theta += 2.0 * Math.PI;
+  theta *= sn;
+  const nx = Math.floor(ra * Math.sin(theta) + XO + 0.5);
+  const ny = Math.floor(ro - ra * Math.cos(theta) + YO + 0.5);
+  return { nx, ny };
+}
