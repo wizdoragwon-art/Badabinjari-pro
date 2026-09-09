@@ -4,7 +4,7 @@
 // ── 백엔드(Google Apps Script) 주소 ──
 // 배포한 웹앱 /exec URL을 넣으면 구글 시트에서 데이터를 읽고, 공유한 URL이 시트에 쌓입니다.
 // 비워두면 로컬 data.json 을 사용합니다.
-const API_URL = "https://script.google.com/macros/s/AKfycbwrlsfEyLdGWYYemJS7FJbiJo0adqkeLpLT1gCt-Z5V1bDQjspUkhS31UFyIu9_0OxH/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbx1FYZGSJl8TeZYNLnVehfCaEZJLBI47gZGOi2cRIGYFx9CdoyUepJLiImaFRBE9Hqn/exec";
 
 // ── 팔레트 (CSS 변수와 동일) ──
 const C = { ink:"#0e2a30", inkSoft:"#4a636a", tide:"#2b8896", tideSoft:"#d3e9ea",
