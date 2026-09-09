@@ -14,7 +14,7 @@ const C = { ink:"#0e2a30", inkSoft:"#4a636a", tide:"#2b8896", tideSoft:"#d3e9ea"
 const DEFAULT_DATA = {
   updated: null,
   spots: [
-    { name:"삼길포 씨유만석낚시", port:"충남 서산 삼길포", lat:36.99, lon:126.35, boats:[
+    { name:"삼길포 씨유만석낚시", port:"삼길포항", lat:36.99, lon:126.35, boats:[
       { id:"cu-manseok", name:"만석호", sp:["쭈꾸미","갑오징어"], dep:"일출", fee:null, cap:20, minGo:10, url:"http://www.mscufishing.com/index.php?mid=bk" },
       { id:"cu-hunter", name:"헌터호", sp:["갑오징어"], dep:"일출", fee:null, cap:15, minGo:8, url:"http://www.mscufishing.com/index.php?mid=bk" },
       { id:"cu-gold", name:"골드피싱호", sp:["백조기","갑오징어"], dep:"일출", fee:null, cap:15, minGo:8, url:"http://www.mscufishing.com/index.php?mid=bk" },
@@ -85,7 +85,7 @@ function searchHarbors(q){
 
 const MODELS = [
   { id:"openmeteo", label:"Open-Meteo", sub:"멀티모델 실측" },
-  { id:"kma", label:"기상청", sub:"단기예보(연동 예정)" },
+  { id:"kma", label:"기상청", sub:"단기예보 3일" },
 ];
 
 // ── 영속 상태 ──
@@ -141,7 +141,7 @@ function addPort(){
   if(n==="전체"||base.includes(n)){ toast("이미 있는 항구예요"); S.addingPort=false; S.portDraft=""; render(); return; }
   S.ports=[...base,n]; LS.set("ports",S.ports);
   S.port=n; S.addingPort=false; S.portDraft=""; S.portResults=[]; S.sel=null; render();
-  toast(`📍 ${n} 추가됨`);
+  buzz("ok"); toast(`📍 ${n} 추가됨`);
 }
 // 항구 검색: 내장 낚시항구 우선 → Open-Meteo 지명 검색 폴백
 async function searchPorts(){
@@ -167,7 +167,7 @@ function pickPort(i){
   S.portCoords[label]={lat:r.lat,lon:r.lon}; LS.set("portCoords",S.portCoords);
   S.port=label; S.addingPort=false; S.portDraft=""; S.portResults=[]; S.sel=null; render();
   ensureWeather();
-  toast(`📍 ${label} 추가됨 (좌표 자동)`);
+  buzz("ok"); toast(`📍 ${label} 추가됨 (좌표 자동)`);
 }
 function removePort(name){
   const base=activePorts();
@@ -218,9 +218,22 @@ function tide7(y,m,d){
   const amp=130+spring*190;
   return { ld, label, mulNum, spring, amp };
 }
+// 항구명 → KHOA 조석 관측소 코드 (봇 데이터 없어도 앱이 조석을 가져오도록 내장)
+const PORT_TIDE = {
+  "삼길포항":"DT_0017", "충남 서산 삼길포":"DT_0017", "대산항":"DT_0017", "당진 한진포구":"DT_0017", "왜목항":"DT_0017", "장고항":"DT_0017",
+  "충남 홍성 남당항":"DT_0025", "남당항":"DT_0025",
+  "충남 보령 대천항":"DT_0025", "대천항":"DT_0025", "대천항(충남)":"DT_0025", "무창포항":"DT_0025",
+  "충남 보령 오천항":"DT_0025", "오천항":"DT_0025",
+  "안흥항":"DT_0067", "신진도항":"DT_0067", "몽산포항":"DT_0067",
+  "홍원항":"DT_0051", "서천마량":"DT_0051",
+  "격포항":"DT_0068", "군산항":"DT_0018",
+  "궁평항":"DT_0002", "전곡항":"DT_0002", "제부도":"DT_0002", "방아머리항":"DT_0002",
+  "영흥도 진두항":"DT_0043",
+};
+function spotTideObs(sp){ if(!sp) return null; return sp.khoaTideObs || PORT_TIDE[sp.port] || PORT_TIDE[(sp.port||"").replace(/\(.*\)/,"")] || null; }
 // 물높이 비율(조석 없을 때): 사리↑ 조금↓
 function tideFrac(y,m,d){ return tide7(y,m,d).spring; }
-function spotTide(sp){ const obs=sp&&sp.khoaTideObs; return (obs&&S.tideByObs[obs])||null; }
+function spotTide(sp){ const obs=spotTideObs(sp); return (obs&&S.tideByObs[obs])||null; }
 function tideOf(sp,y,m,d){ const t=spotTide(sp); return t&&t[ymd(y,m,d)]; }
 function tideFillReal(sp,y,m,d){
   const t=spotTide(sp); if(!t) return null;
@@ -273,7 +286,10 @@ async function ensureKma(){
 // 조석예보(Apps Script 프록시) 로드 — 현재 항구의 관측소
 async function ensureTide(){
   if(!API_URL) return;
-  const sp=curSpot(); const obs=sp&&sp.khoaTideObs; if(!obs) return;
+  const sp=curSpot(); let obs=spotTideObs(sp);
+  // 검색으로 추가한 항구(스팟 없음)도 PORT_TIDE로 해석
+  if(!obs && S.port && S.port!=="전체") obs=PORT_TIDE[S.port] || PORT_TIDE[S.port.replace(/\(.*\)/,"")];
+  if(!obs) return;
   if(S.tideByObs[obs]||S.tideLoading[obs]) return;
   S.tideLoading[obs]=true;
   try{
@@ -288,9 +304,6 @@ function curSpot(){
   if(S.port && S.port!=="전체"){ const s=allSpots().find(x=>x.port===S.port); if(s) return s; }
   return allSpots().find(x=>x.lat!=null) || allSpots()[0] || null;
 }
-const DIR16=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
-const DIR16KO=["북","북북동","북동","동북동","동","동남동","남동","남남동","남","남남서","남서","서남서","서","서북서","북서","북북서"];
-function dirText(d){ if(d==null) return ""; if(typeof d==="string") return d; const i=Math.round(((d%360)/22.5))%16; return DIR16KO[i]; }
 
 async function ensureWeather(){
   const c=curCoords(); if(!c) return;
@@ -468,7 +481,7 @@ function renderCalendar(){
       <div class="cellin">
         <div class="d">${d}</div>
         ${past ? `<div class="none">지남</div>`
-          : (!hasData ? (S.loading ? `<div class="none" style="font-size:8.5px;color:${C.tide}">불러오는중</div>` : `<div class="none" style="font-size:9px">정보없음</div>`)
+          : (!hasData ? (S.loading ? `<div class="skel" style="height:13px;margin:3px 4px 0"></div>` : `<div class="none" style="font-size:9px">정보없음</div>`)
             : (sum>0 ? `<div class="open">빈 ${sum}</div>` : `<div class="none">마감</div>`))}
         <div class="mul">${t.label}</div>
         <div class="wv" style="justify-content:center;gap:3px;font-size:9px"><span title="오전">${ap.am}</span><span title="오후">${ap.pm}</span></div>
@@ -523,6 +536,8 @@ function renderDetail(y,m,d){
   const t=tide7(y,m,d), w=weatherOf(y,m,d,S.model), gs=goScore(w);
   const dt=new Date(y,m,d);
   const boats=boatsForSp(S.species);
+  const rank=(b)=>{ const o=seatsOf(b,y,m,d); return o===null?2:(o===0?1:0); };  // 빈자리>마감>정보없음
+  boats.sort((a,bb)=> rank(a)-rank(bb) || (seatsOf(bb,y,m,d)||0)-(seatsOf(a,y,m,d)||0));
   const shown = S.hideFull ? boats.filter(b=>{ const o=seatsOf(b,y,m,d); return o!==null && o>0; }) : boats;
   let list="";
   for(const b of shown){
@@ -531,7 +546,7 @@ function renderDetail(y,m,d){
     list+=`<div class="card" style="padding:12px;margin-top:8px;${soldout?"opacity:.62":""}">
       <div class="row" style="align-items:flex-start">
         <div style="flex:1">
-          <div class="row gap"><span>🚢</span><span style="font-size:15px;font-weight:800">${esc(b.name)}</span>${b.url?`<span style="font-size:9px;font-weight:800;color:${C.ok};background:#d6ede2;border-radius:5px;padding:1px 5px">연동</span>`:""}</div>
+          <div class="row gap"><span>🚢</span><span style="font-size:15px;font-weight:800">${esc(b.name)}</span>${open!==null?`<span style="font-size:9px;font-weight:800;color:${C.ok};background:#d6ede2;border-radius:5px;padding:1px 5px">실시간</span>`:""}</div>
           <div style="font-size:11.5px;color:${C.inkSoft};margin-top:4px">📍 ${esc(b._port||"")} · ${esc(b._spot||"")}</div>
           <div class="row" style="gap:10px;font-size:11.5px;color:${C.inkSoft};margin-top:5px"><span>🕕 ${esc(b.dep||"")} 출항</span><span>선비 ${b.fee?b.fee+"만":"문의"}</span></div>
           <div style="margin-top:6px">${(b.sp||[]).map(s=>`<span class="tag">${spEmoji(s)} ${esc(s)}</span>`).join("")}</div>
@@ -566,7 +581,11 @@ function renderDetail(y,m,d){
         <div style="font-size:12px;font-weight:700;color:${C.inkSoft}">기상 예보</div>
         <div class="row" style="gap:4px">${MODELS.map(md=>`<button class="modelbtn ${S.model===md.id?"on":""}" data-action="model" data-v="${md.id}">${md.label}</button>`).join("")}</div>
       </div>
-      <div style="font-size:10px;color:${C.inkSoft};margin-bottom:10px">${w._real?"소스: 실측 · Open-Meteo(항구별·오전/오후)":"소스: 참고용 데모 · 실측 예보는 약 16일 이내만 제공"}</div>
+      <div style="font-size:10px;color:${C.inkSoft};margin-bottom:10px">${
+        S.model==="kma"
+          ? "기상청 단기예보 · 오늘부터 3일 이내 정밀 (그 이후는 Open-Meteo로 전환)"
+          : (w._real?"Open-Meteo 실측 · 항구별 오전/오후 · 약 16일":"참고용 데모 · 실측 예보는 약 16일 이내만")
+      }</div>
       <div class="cal" style="grid-template-columns:repeat(4,1fr)">
         ${metric("🌡️",w.temp+"°","기온")}${metric("🌊",w.wave+"m","파고",w.wave>1.5)}${metric("💨",w.wind,"풍속 m/s",w.wind>10)}${metric("💧",w.rain+"%","강수")}
       </div>
@@ -576,11 +595,22 @@ function renderDetail(y,m,d){
       <div style="margin-top:10px;background:${"#eef2f1"};border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;color:${gs.c}">⚓ ${gs.t}</div>
     </div>
     ${(()=>{ const sp=curSpot(); const td=tideOf(sp,y,m,d);
-      if(!td) return "";
+      const obs=spotTideObs(sp) || (S.port!=="전체"&&(PORT_TIDE[S.port]||PORT_TIDE[(S.port||"").replace(/\(.*\)/,"")]));
+      const label = (S.port&&S.port!=="전체")?S.port : (sp?(sp.port||sp.name):"");
+      if(!td){
+        // 조석 관측소는 있는데 아직 로딩 중/데이터 없음
+        if(obs && S.tideLoading[obs]) return `<div class="card" style="padding:12px;margin-top:10px"><div class="skel" style="height:16px;width:60%"></div><div class="skel" style="height:12px;width:40%;margin-top:8px"></div></div>`;
+        if(obs) return `<div class="card" style="padding:10px 12px;margin-top:10px;font-size:11px;color:${C.inkSoft}">🌊 ${esc(label)} 조석 불러오는 중… (당겨서 새로고침)</div>`;
+        return "";
+      }
+      const fill=Math.round((tideFillReal(sp,y,m,d) ?? tide7(y,m,d).spring)*100);
       const tideRow = `<div style="display:flex;flex-wrap:wrap;gap:6px">${td.events.map(e=>`<span style="font-size:11.5px;font-weight:700;color:${e.hl==="만조"?C.tide:C.beacon};background:${e.hl==="만조"?C.tideSoft:"#f7e5d1"};border-radius:6px;padding:3px 8px">${e.hl==="만조"?"▲":"▼"} ${e.t} <span style="opacity:.65;font-weight:400">${e.lv}cm</span></span>`).join("")}</div>
-        <div style="font-size:10.5px;color:${C.inkSoft};margin-top:6px">조차 ${td.range}cm · 고 ${td.hi} / 저 ${td.lo}</div>`;
+        <div class="row" style="justify-content:space-between;align-items:center;margin-top:8px">
+          <span style="font-size:10.5px;color:${C.inkSoft}">조차 ${td.range}cm · 고 ${td.hi} / 저 ${td.lo}cm</span>
+          <span style="font-size:11px;font-weight:800;color:#2f9e83">물높이 ${fill}%</span>
+        </div>`;
       return `<div class="card" style="padding:12px;margin-top:10px">
-        <div style="font-size:12px;font-weight:700;color:${C.inkSoft};margin-bottom:8px">🌊 물때(만조·간조) · ${esc(sp.port||sp.name)} · KHOA</div>
+        <div style="font-size:12px;font-weight:700;color:${C.inkSoft};margin-bottom:8px">🌊 물때(만조·간조) · ${esc(label)} · KHOA</div>
         ${tideRow}
       </div>`;
     })()}
@@ -720,11 +750,14 @@ function render(){
 
 let toastTimer;
 function toast(msg){ const el=document.getElementById("toast"); if(!el)return; el.textContent="✓ "+msg; el.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove("show"),2400); }
+// 햅틱(진동) — 지원 기기에서만. tap=가벼운 탭, ok=저장/완료 확인
+function buzz(kind){ try{ if(!navigator.vibrate) return; navigator.vibrate(kind==="ok"?[14,36,14]:kind==="warn"?[30,40,30]:8); }catch{} }
 
 // ── 이벤트 (위임) ──
 document.addEventListener("click",(e)=>{
   const el=e.target.closest("[data-action]"); if(!el)return;
   const a=el.dataset.action, v=el.dataset.v;
+  buzz("tap");
   if(a==="species"){ S.species=v; S.sel=null; S.addingSp=false; render(); }
   else if(a==="addsp"){ S.addingSp=!S.addingSp; S.spDraft=""; render(); if(S.addingSp){ const el=document.getElementById("spIn"); if(el) el.focus(); } }
   else if(a==="spadd"){ addSpecies(); }
@@ -786,6 +819,7 @@ function saveSubForBoat(boatId, off){
     if(off || ranges.length===0) delete S.subs[boatId]; else S.subs[boatId]=ranges;
     LS.set("subsMap", S.subs);
     S.editBoat=null; S.editRanges=[]; render();
+    buzz("ok");
     toast(off?"알림을 껐어요":`${b.name} 알림 ${ranges.length}개 기간 저장`);
   });
 }
@@ -800,7 +834,7 @@ function addSpecies(){
   LS.set("speciesList", S.speciesList);
   S.species=name; S.addingSp=false; S.spDraft=""; S.sel=null;
   render();
-  toast(`${spEmoji(name)} ${name} 추가됨`);
+  buzz("ok"); toast(`${spEmoji(name)} ${name} 추가됨`);
 }
 
 function addOperator(){
@@ -868,11 +902,26 @@ async function submitUrl(url, name){
   try{
     const q=`?action=submit&url=${encodeURIComponent(url)}&name=${encodeURIComponent(name||"")}&by=me`;
     await fetch(API_URL+q);
-    toast("시트에 공유했어요");
+    buzz("ok"); toast("시트에 공유했어요");
     boot();
   }catch{ toast("공유 실패 — 네트워크 확인"); }
 }
 boot();
+
+// ── 당겨서 새로고침 ──
+(function(){
+  let startY=0, pulling=false, ind=null;
+  function bar(){ if(ind) return ind; ind=document.createElement("div");
+    ind.style.cssText="position:fixed;top:0;left:0;right:0;display:flex;justify-content:center;align-items:center;height:0;overflow:hidden;color:#2b8896;font-size:12px;font-weight:800;background:rgba(255,255,255,.9);z-index:200;transition:height .15s";
+    document.body.appendChild(ind); return ind; }
+  window.addEventListener("touchstart",(e)=>{ if(window.scrollY<=0 && e.touches.length===1){ startY=e.touches[0].clientY; pulling=true; } },{passive:true});
+  window.addEventListener("touchmove",(e)=>{ if(!pulling) return; const dy=e.touches[0].clientY-startY;
+    if(dy>0 && window.scrollY<=0){ const h=Math.min(60,dy*0.5); bar().style.height=h+"px"; bar().textContent=h>=50?"놓으면 새로고침 ↻":"당겨서 새로고침"; } },{passive:true});
+  window.addEventListener("touchend",()=>{ if(!pulling) return; pulling=false;
+    const h=parseInt((ind&&ind.style.height)||"0",10);
+    if(h>=50){ bar().textContent="새로고침 중…"; buzz&&buzz("tap"); Promise.resolve(boot()).finally(()=>{ setTimeout(()=>{ if(ind) ind.style.height="0"; },400); }); }
+    else if(ind){ ind.style.height="0"; } });
+})();
 
 // ── 서비스워커 등록 ──
 if("serviceWorker" in navigator){

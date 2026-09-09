@@ -45,6 +45,8 @@
   .cell.on{background:var(--ink);border-color:var(--ink);}
   .cellfill{position:absolute;left:0;right:0;bottom:0;background:rgba(127,255,212,.42);z-index:0;transition:height .3s;}
   .cell.on .cellfill{background:rgba(127,255,212,.30);}
+  .skel{border-radius:5px;background:linear-gradient(100deg,#eef2f1 30%,#dfe8e6 50%,#eef2f1 70%);background-size:200% 100%;animation:shimmer 1.1s linear infinite;}
+  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
   .cellin{position:relative;z-index:1;}
   .ports{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;padding-bottom:2px;}
   .port{white-space:nowrap;border:1px solid var(--line);background:#fff;color:var(--ink-soft);border-radius:999px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;}
