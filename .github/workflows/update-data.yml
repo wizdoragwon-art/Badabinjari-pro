@@ -2,9 +2,9 @@ name: 빈자리 갱신 (텔레그램 알림 + PWA 데이터)
 
 on:
   schedule:
-    # 30분마다, KST 08~23시에만 (UTC 23시 + 0~13시). GitHub 부하로 지연 가능.
-    - cron: "0,30 23 * * *"
-    - cron: "0,30 0-13 * * *"
+    # 30분마다, KST 06~24시에만 (UTC 21~23시 + 0~14시). GitHub 부하로 지연 가능.
+    - cron: "0,30 21-23 * * *"
+    - cron: "0,30 0-14 * * *"
   workflow_dispatch: {}       # 수동 실행 버튼
 
 permissions:
@@ -30,7 +30,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SHEET_URL: ${{ secrets.SHEET_URL }}       # 구글 Apps Script /exec URL (구독 읽기)
-          KHOA_KEY: ${{ secrets.KHOA_KEY }}         # 국립해양조사원 인증키 (조류·수온)
           DATA_OUT: ../pwa/data.json     # PWA가 읽는 위치로 바로 출력
         run: node check.js
 
